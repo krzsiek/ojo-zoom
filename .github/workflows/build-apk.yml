@@ -408,7 +408,34 @@ jobs:
       - name: Build debug APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          set +e
+          ./gradlew assembleDebug --no-daemon --stacktrace > build.log 2>&1
+          rc=$?
+          tail -n 150 build.log
+          if [ $rc -ne 0 ]; then
+            # Put the important part of the error on the run summary page
+            grep -n -E "error:|warning: \\[|What went wrong|Could not|Execution failed|Caused by|^> [^T]|FAILURE" build.log | grep -v "^\s*$" | head -n 80 > err.txt
+            {
+              echo '## Build error'
+              echo '```'
+              cat err.txt
+              echo '```'
+              echo '## Last 60 lines of log'
+              echo '```'
+              tail -n 60 build.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            msg=$(head -n 25 err.txt | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+            echo "::error title=Gradle build failed::$msg"
+          fi
+          exit $rc
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: build-log
+          path: build.log
 
       - uses: actions/upload-artifact@v5
         with:
