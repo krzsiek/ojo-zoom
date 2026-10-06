@@ -401,7 +401,7 @@ jobs:
           }
           EOF_GRADLE
           echo "include ':libvlc'" >> settings.gradle
-          sed -i "s|implementation 'de.mrmaffen:libvlc-android:2.1.12@aar'|implementation project(':libvlc')|" app/build.gradle
+          sed -i "s|implementation 'de.mrmaffen:libvlc-android:2.1.12@aar'|implementation project(':libvlc')\\n    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.0')|" app/build.gradle
           sed -i '/jcenter()/d' build.gradle
           grep -n "libvlc" app/build.gradle settings.gradle
 
