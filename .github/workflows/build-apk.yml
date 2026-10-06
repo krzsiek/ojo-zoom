@@ -1,0 +1,416 @@
+name: Build APK
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # Original Ojo source (independent of whatever else is in this fork)
+      - uses: actions/checkout@v5
+        with:
+          repository: penguin86/ojo
+          ref: eb851e7f9c7487bdc744af80f049bedb812468d2
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Apply zoom mod
+        run: |
+          cat > zoom.patch <<'EOF_PATCH'
+          diff --git a/app/build.gradle b/app/build.gradle
+          index d4af6fe..8d49a47 100644
+          --- a/app/build.gradle
+          +++ b/app/build.gradle
+          @@ -6,11 +6,11 @@ android {
+               compileSdkVersion 33
+           
+               defaultConfig {
+          -        applicationId "it.danieleverducci.ojo"
+          +        applicationId "it.danieleverducci.ojo.zoom"
+                   minSdkVersion 15
+                   targetSdkVersion 33
+                   versionCode 9
+          -        versionName "0.1.4"
+          +        versionName "0.1.4-zoom"
+           
+                   vectorDrawables.useSupportLibrary = true
+           
+          diff --git a/app/src/main/java/it/danieleverducci/ojo/ui/SurveillanceFragment.java b/app/src/main/java/it/danieleverducci/ojo/ui/SurveillanceFragment.java
+          index 7710f0c..2545720 100644
+          --- a/app/src/main/java/it/danieleverducci/ojo/ui/SurveillanceFragment.java
+          +++ b/app/src/main/java/it/danieleverducci/ojo/ui/SurveillanceFragment.java
+          @@ -6,16 +6,19 @@ import android.net.Uri;
+           import android.os.Build;
+           import android.os.Bundle;
+           import android.util.Log;
+          +import android.view.GestureDetector;
+           import android.view.LayoutInflater;
+          -import android.view.SurfaceHolder;
+          -import android.view.SurfaceView;
+          +import android.view.MotionEvent;
+          +import android.view.ScaleGestureDetector;
+          +import android.view.TextureView;
+           import android.view.View;
+           import android.view.ViewGroup;
+          -import android.view.ViewTreeObserver;
+           import android.view.Window;
+           import android.view.WindowManager;
+          +import android.widget.FrameLayout;
+           import android.widget.LinearLayout;
+           
+          +import androidx.core.content.ContextCompat;
+           import androidx.core.view.WindowCompat;
+           import androidx.core.view.WindowInsetsCompat;
+           import androidx.core.view.WindowInsetsControllerCompat;
+          @@ -106,6 +109,13 @@ public class SurveillanceFragment extends Fragment {
+                   ((MainActivity)getActivity()).setOnBackButtonPressedListener(new OnBackButtonPressedListener() {
+                       @Override
+                       public boolean onBackPressed() {
+          +                // First back press while zoomed: just reset the zoom
+          +                for (CameraView cv : cameraViews) {
+          +                    if (cv.isZoomed()) {
+          +                        cv.resetZoom();
+          +                        return true;
+          +                    }
+          +                }
+                           if(fullscreenCameraView && cameraViews.size() > 1) {
+                               fullscreenCameraView = false;
+                               showAllCameras();
+          @@ -216,6 +226,8 @@ public class SurveillanceFragment extends Fragment {
+               }
+           
+               protected void showAllCameras() {
+          +        for (CameraView cv : cameraViews)
+          +            cv.resetZoom();
+                   for (int i = 0; i < binding.gridRowContainer.getChildCount(); i++) {
+                       LinearLayout row = (LinearLayout) binding.gridRowContainer.getChildAt(i);
+                       row.setLayoutParams(rowLayoutParams);
+          @@ -233,7 +245,7 @@ public class SurveillanceFragment extends Fragment {
+                   );
+           
+                   // Add to layout
+          -        rowContainer.addView(cv.surfaceView, cameraViewLayoutParams);
+          +        rowContainer.addView(cv.container, cameraViewLayoutParams);
+           
+                   cameraViews.add(cv);
+                   return cv;
+          @@ -284,50 +296,74 @@ public class SurveillanceFragment extends Fragment {
+                   if (index < 0 || cameraViews.size() <= index) {
+                       return;
+                   }
+          -        hideAllCameraViewsButNot(cameraViews.get(index).surfaceView);
+          +        fullscreenCameraView = true;
+          +        hideAllCameraViewsButNot(cameraViews.get(index).container);
+               }
+           
+               private void expandByName(String name) {
+                   for(CameraView cameraView: cameraViews) {
+                       if (cameraView.camera.getName().equals(name)) {
+          -                hideAllCameraViewsButNot(cameraView.surfaceView);
+          +                fullscreenCameraView = true;
+          +                hideAllCameraViewsButNot(cameraView.container);
+                           break;
+                       }
+                   }
+               }
+           
+          +    /**
+          +     * Zoom is allowed only when a single camera fills the screen
+          +     */
+          +    private boolean isZoomAllowed() {
+          +        return fullscreenCameraView || cameraViews.size() == 1;
+          +    }
+          +
+               /**
+                * Contains all entities (views and java entities) related to a camera stream viewer
+                */
+               private class CameraView {
+          -        protected SurfaceView surfaceView;
+          +        final static private float MAX_ZOOM = 8f;
+          +        final static private float DOUBLE_TAP_ZOOM = 2.5f;
+          +
+          +        protected FrameLayout container;   // Grid cell: handles focus, clicks and gestures, clips zoomed video
+          +        protected TextureView videoView;   // Video output (TextureView supports scale/translation, SurfaceView doesn't)
+                   protected MediaPlayer mediaPlayer;
+                   protected IVLCVout ivlcVout;
+                   protected Camera camera;
+                   protected LibVLC libvlc;
+           
+          +        private float zoom = 1f;
+          +        private float panX = 0f;
+          +        private float panY = 0f;
+          +        private boolean tapAlreadyHandled = false;
+          +
+                   public CameraView(Context context, Camera camera) {
+                       this.camera = camera;
+                       this.libvlc = new LibVLC(context, new ArrayList<>(Arrays.asList(VLC_OPTIONS)));
+           
+          -            surfaceView = new SurfaceView(context);
+          -            surfaceView.setOnClickListener(new View.OnClickListener() {
+          -                @Override
+          -                public void onClick(View v) {
+          +            container = new FrameLayout(context);
+          +            container.setClipChildren(true);
+          +            container.setFocusable(true);
+          +            // Foreground, not background: the video would cover a background drawable
+          +            container.setOnFocusChangeListener((view, hasFocus) -> container.setForeground(
+          +                    hasFocus ? ContextCompat.getDrawable(context, R.drawable.focus_border) : null));
+           
+          -                }
+          -            });
+          -            surfaceView.setOnFocusChangeListener((view, hasFocus) -> view.setBackgroundResource(hasFocus ? R.drawable.focus_border : 0));
+          -            SurfaceHolder holder = surfaceView.getHolder();
+          +            videoView = new TextureView(context);
+          +            videoView.setPivotX(0f);
+          +            videoView.setPivotY(0f);
+          +            videoView.setKeepScreenOn(true);
+          +            container.addView(videoView, new FrameLayout.LayoutParams(
+          +                    FrameLayout.LayoutParams.MATCH_PARENT,
+          +                    FrameLayout.LayoutParams.MATCH_PARENT
+          +            ));
+           
+          -            holder.setKeepScreenOn(true);
+          +            setupGestures(context);
+           
+                       // Create media player
+                       mediaPlayer = new MediaPlayer(libvlc);
+           
+                       // Set up video output
+                       ivlcVout = mediaPlayer.getVLCVout();
+          -            ivlcVout.setVideoView(surfaceView);
+          +            ivlcVout.setVideoView(videoView);
+                       ivlcVout.attachViews();
+           
+                       // Load media and start playing
+          @@ -335,15 +371,127 @@ public class SurveillanceFragment extends Fragment {
+                       mediaPlayer.setMedia(m);
+           
+                       // Register for view resize events
+          -            final ViewTreeObserver observer= surfaceView.getViewTreeObserver();
+          -            observer.addOnGlobalLayoutListener(() -> {
+          -                // Set rendering size
+          -                ivlcVout.setWindowSize(surfaceView.getWidth(), surfaceView.getHeight());
+          +            container.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+          +                if ((r - l) != (or - ol) || (b - t) != (ob - ot)) {
+          +                    // Size changed (fullscreen toggle, rotation): set rendering size and reset zoom
+          +                    if (ivlcVout != null && r - l > 0 && b - t > 0)
+          +                        ivlcVout.setWindowSize(r - l, b - t);
+          +                    resetZoom();
+          +                }
+                       });
+                   }
+           
+          +        private void setupGestures(Context context) {
+          +            final ScaleGestureDetector scaleDetector = new ScaleGestureDetector(context,
+          +                    new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+          +                        @Override
+          +                        public boolean onScale(ScaleGestureDetector detector) {
+          +                            if (!isZoomAllowed())
+          +                                return false;
+          +                            zoomBy(detector.getScaleFactor(), detector.getFocusX(), detector.getFocusY());
+          +                            return true;
+          +                        }
+          +                    });
+          +
+          +            final GestureDetector gestureDetector = new GestureDetector(context,
+          +                    new GestureDetector.SimpleOnGestureListener() {
+          +                        @Override
+          +                        public boolean onDown(MotionEvent e) {
+          +                            return true;
+          +                        }
+          +
+          +                        @Override
+          +                        public boolean onSingleTapUp(MotionEvent e) {
+          +                            // In grid mode toggle immediately (no double tap there)
+          +                            if (!isZoomAllowed()) {
+          +                                tapAlreadyHandled = true;
+          +                                container.performClick();
+          +                                return true;
+          +                            }
+          +                            return false;
+          +                        }
+          +
+          +                        @Override
+          +                        public boolean onSingleTapConfirmed(MotionEvent e) {
+          +                            // Ignore single taps while zoomed to avoid leaving fullscreen by accident
+          +                            if (!tapAlreadyHandled && !isZoomed())
+          +                                container.performClick();
+          +                            return true;
+          +                        }
+          +
+          +                        @Override
+          +                        public boolean onDoubleTap(MotionEvent e) {
+          +                            if (!isZoomAllowed())
+          +                                return false;
+          +                            if (isZoomed())
+          +                                resetZoom();
+          +                            else
+          +                                zoomBy(DOUBLE_TAP_ZOOM, e.getX(), e.getY());
+          +                            return true;
+          +                        }
+          +
+          +                        @Override
+          +                        public boolean onScroll(MotionEvent e1, MotionEvent e2, float distanceX, float distanceY) {
+          +                            if (!isZoomed())
+          +                                return false;
+          +                            panX -= distanceX;
+          +                            panY -= distanceY;
+          +                            applyTransform();
+          +                            return true;
+          +                        }
+          +                    });
+          +
+          +            container.setOnTouchListener((v, event) -> {
+          +                if (event.getActionMasked() == MotionEvent.ACTION_DOWN)
+          +                    tapAlreadyHandled = false;
+          +                scaleDetector.onTouchEvent(event);
+          +                gestureDetector.onTouchEvent(event);
+          +                return true;
+          +            });
+          +        }
+          +
+          +        /**
+          +         * Multiplies the zoom by factor, keeping the point (focusX, focusY) still on screen
+          +         */
+          +        private void zoomBy(float factor, float focusX, float focusY) {
+          +            float newZoom = Math.max(1f, Math.min(MAX_ZOOM, zoom * factor));
+          +            float realFactor = newZoom / zoom;
+          +            panX = focusX - realFactor * (focusX - panX);
+          +            panY = focusY - realFactor * (focusY - panY);
+          +            zoom = newZoom;
+          +            applyTransform();
+          +        }
+          +
+          +        private void applyTransform() {
+          +            int w = container.getWidth();
+          +            int h = container.getHeight();
+          +            // Do not allow panning outside the image
+          +            panX = Math.max(w - w * zoom, Math.min(0f, panX));
+          +            panY = Math.max(h - h * zoom, Math.min(0f, panY));
+          +            if (zoom <= 1f) {
+          +                zoom = 1f;
+          +                panX = 0f;
+          +                panY = 0f;
+          +            }
+          +            videoView.setScaleX(zoom);
+          +            videoView.setScaleY(zoom);
+          +            videoView.setTranslationX(panX);
+          +            videoView.setTranslationY(panY);
+          +        }
+          +
+          +        public boolean isZoomed() {
+          +            return zoom > 1.001f;
+          +        }
+          +
+          +        public void resetZoom() {
+          +            zoom = 1f;
+          +            panX = 0f;
+          +            panY = 0f;
+          +            applyTransform();
+          +        }
+          +
+                   public void setOnClickListener(View.OnClickListener listener) {
+          -            surfaceView.setOnClickListener(listener);
+          +            container.setOnClickListener(listener);
+                   }
+           
+                   /**
+          @@ -369,6 +517,7 @@ public class SurveillanceFragment extends Fragment {
+                       libvlc = null;
+                       mediaPlayer.release();
+                       mediaPlayer = null;
+          +            ivlcVout = null;
+                   }
+               }
+           }
+          \ No newline at end of file
+          diff --git a/app/src/main/res/values-it/strings.xml b/app/src/main/res/values-it/strings.xml
+          index 3151708..29c456b 100644
+          --- a/app/src/main/res/values-it/strings.xml
+          +++ b/app/src/main/res/values-it/strings.xml
+          @@ -1,6 +1,6 @@
+           <?xml version="1.0" encoding="utf-8"?>
+           <resources>
+          -    <string name="app_name">Ojo</string>
+          +    <string name="app_name">Ojo Zoom</string>
+               <!-- Strings used for fragments for navigation -->
+               <string name="first_fragment_label">First Fragment</string>
+               <string name="second_fragment_label">Second Fragment</string>
+          diff --git a/app/src/main/res/values-ru/strings.xml b/app/src/main/res/values-ru/strings.xml
+          index c3dae22..8b5cd3e 100644
+          --- a/app/src/main/res/values-ru/strings.xml
+          +++ b/app/src/main/res/values-ru/strings.xml
+          @@ -1,6 +1,6 @@
+           <?xml version="1.0" encoding="utf-8"?>
+           <resources>
+          -    <string name="app_name">Ojo</string>
+          +    <string name="app_name">Ojo Zoom</string>
+               <!-- Strings used for fragments for navigation -->
+               <string name="first_fragment_label">Первый Фрагмент</string>
+               <string name="second_fragment_label">Второй Фрагмент</string>
+          diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+          index 693eb67..2e76d90 100644
+          --- a/app/src/main/res/values/strings.xml
+          +++ b/app/src/main/res/values/strings.xml
+          @@ -1,5 +1,5 @@
+           <resources>
+          -    <string name="app_name">Ojo</string>
+          +    <string name="app_name">Ojo Zoom</string>
+               <!-- Strings used for fragments for navigation -->
+               <string name="first_fragment_label">First Fragment</string>
+               <string name="second_fragment_label">Second Fragment</string>
+          EOF_PATCH
+          git apply --whitespace=nowarn zoom.patch
+          echo "Zoom patch applied OK"
+
+      # libVLC 2.1.12 was only published on JCenter (shut down) -> build it from its original source
+      - name: Add libVLC 2.1.12 as local module
+        run: |
+          git clone https://github.com/mrmaffen/vlc-android-sdk /tmp/vlcsdk
+          git -C /tmp/vlcsdk checkout 769f365
+          mkdir -p libvlc/src/main
+          cp -r /tmp/vlcsdk/libvlc-android/src/main/java /tmp/vlcsdk/libvlc-android/src/main/jniLibs libvlc/src/main/
+          find libvlc -name '*.java' -exec sed -i 's/android\.support\.annotation/androidx.annotation/g' {} +
+          echo '<manifest xmlns:android="http://schemas.android.com/apk/res/android" />' > libvlc/src/main/AndroidManifest.xml
+          cat > libvlc/build.gradle <<'EOF_GRADLE'
+          plugins {
+              id 'com.android.library'
+          }
+          android {
+              namespace 'org.videolan.libvlc'
+              compileSdkVersion 33
+              defaultConfig {
+                  minSdkVersion 15
+                  targetSdkVersion 33
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_1_8
+                  targetCompatibility JavaVersion.VERSION_1_8
+              }
+              lintOptions {
+                  abortOnError false
+              }
+          }
+          dependencies {
+              implementation 'androidx.annotation:annotation:1.6.0'
+          }
+          EOF_GRADLE
+          echo "include ':libvlc'" >> settings.gradle
+          sed -i "s|implementation 'de.mrmaffen:libvlc-android:2.1.12@aar'|implementation project(':libvlc')|" app/build.gradle
+          sed -i '/jcenter()/d' build.gradle
+          grep -n "libvlc" app/build.gradle settings.gradle
+
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ojo-zoom-apk
+          path: app/build/outputs/apk/debug/*.apk
