@@ -41,10 +41,15 @@ jobs:
                    vectorDrawables.useSupportLibrary = true
            
           diff --git a/app/src/main/java/it/danieleverducci/ojo/ui/SurveillanceFragment.java b/app/src/main/java/it/danieleverducci/ojo/ui/SurveillanceFragment.java
-          index 7710f0c..2545720 100644
+          index 7710f0c..1a6bf3d 100644
           --- a/app/src/main/java/it/danieleverducci/ojo/ui/SurveillanceFragment.java
           +++ b/app/src/main/java/it/danieleverducci/ojo/ui/SurveillanceFragment.java
-          @@ -6,16 +6,19 @@ import android.net.Uri;
+          @@ -2,20 +2,24 @@ package it.danieleverducci.ojo.ui;
+           
+           import android.content.Context;
+           import android.content.Intent;
+          +import android.graphics.SurfaceTexture;
+           import android.net.Uri;
            import android.os.Build;
            import android.os.Bundle;
            import android.util.Log;
@@ -67,7 +72,7 @@ jobs:
            import androidx.core.view.WindowCompat;
            import androidx.core.view.WindowInsetsCompat;
            import androidx.core.view.WindowInsetsControllerCompat;
-          @@ -106,6 +109,13 @@ public class SurveillanceFragment extends Fragment {
+          @@ -106,6 +110,13 @@ public class SurveillanceFragment extends Fragment {
                    ((MainActivity)getActivity()).setOnBackButtonPressedListener(new OnBackButtonPressedListener() {
                        @Override
                        public boolean onBackPressed() {
@@ -81,7 +86,7 @@ jobs:
                            if(fullscreenCameraView && cameraViews.size() > 1) {
                                fullscreenCameraView = false;
                                showAllCameras();
-          @@ -216,6 +226,8 @@ public class SurveillanceFragment extends Fragment {
+          @@ -216,6 +227,8 @@ public class SurveillanceFragment extends Fragment {
                }
            
                protected void showAllCameras() {
@@ -90,7 +95,7 @@ jobs:
                    for (int i = 0; i < binding.gridRowContainer.getChildCount(); i++) {
                        LinearLayout row = (LinearLayout) binding.gridRowContainer.getChildAt(i);
                        row.setLayoutParams(rowLayoutParams);
-          @@ -233,7 +245,7 @@ public class SurveillanceFragment extends Fragment {
+          @@ -233,7 +246,7 @@ public class SurveillanceFragment extends Fragment {
                    );
            
                    // Add to layout
@@ -99,7 +104,7 @@ jobs:
            
                    cameraViews.add(cv);
                    return cv;
-          @@ -284,50 +296,74 @@ public class SurveillanceFragment extends Fragment {
+          @@ -284,73 +297,246 @@ public class SurveillanceFragment extends Fragment {
                    if (index < 0 || cameraViews.size() <= index) {
                        return;
                    }
@@ -145,6 +150,8 @@ jobs:
           +        private float panX = 0f;
           +        private float panY = 0f;
           +        private boolean tapAlreadyHandled = false;
+          +        private boolean surfaceAttached = false;   // VLC output connected to the TextureView surface
+          +        private boolean playRequested = false;
           +
                    public CameraView(Context context, Camera camera) {
                        this.camera = camera;
@@ -180,16 +187,52 @@ jobs:
                        // Create media player
                        mediaPlayer = new MediaPlayer(libvlc);
            
-                       // Set up video output
+          -            // Set up video output
                        ivlcVout = mediaPlayer.getVLCVout();
           -            ivlcVout.setVideoView(surfaceView);
-          +            ivlcVout.setVideoView(videoView);
-                       ivlcVout.attachViews();
+          -            ivlcVout.attachViews();
            
-                       // Load media and start playing
-          @@ -335,15 +371,127 @@ public class SurveillanceFragment extends Fragment {
+          -            // Load media and start playing
+          +            // Load media
+                       Media m = new Media(libvlc, Uri.parse(camera.getRtspUrl()));
                        mediaPlayer.setMedia(m);
            
+          +            // Video output: connect VLC only once the TextureView surface really exists
+          +            // (libVLC 2.x crashes if given a TextureView whose surface isn't created yet)
+          +            videoView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
+          +                @Override
+          +                public void onSurfaceTextureAvailable(SurfaceTexture surfaceTexture, int width, int height) {
+          +                    if (mediaPlayer == null || surfaceAttached)
+          +                        return;
+          +                    ivlcVout.setVideoSurface(surfaceTexture);
+          +                    ivlcVout.attachViews();
+          +                    ivlcVout.setWindowSize(width, height);
+          +                    surfaceAttached = true;
+          +                    if (playRequested)
+          +                        mediaPlayer.play();
+          +                }
+          +
+          +                @Override
+          +                public void onSurfaceTextureSizeChanged(SurfaceTexture surfaceTexture, int width, int height) {
+          +                    if (mediaPlayer != null && width > 0 && height > 0)
+          +                        ivlcVout.setWindowSize(width, height);
+          +                }
+          +
+          +                @Override
+          +                public boolean onSurfaceTextureDestroyed(SurfaceTexture surfaceTexture) {
+          +                    if (mediaPlayer != null && surfaceAttached) {
+          +                        mediaPlayer.stop();
+          +                        ivlcVout.detachViews();
+          +                    }
+          +                    surfaceAttached = false;
+          +                    return true;
+          +                }
+          +
+          +                @Override
+          +                public void onSurfaceTextureUpdated(SurfaceTexture surfaceTexture) {
+          +                }
+          +            });
+          +
                        // Register for view resize events
           -            final ViewTreeObserver observer= surfaceView.getViewTreeObserver();
           -            observer.addOnGlobalLayoutListener(() -> {
@@ -198,7 +241,7 @@ jobs:
           +            container.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
           +                if ((r - l) != (or - ol) || (b - t) != (ob - ot)) {
           +                    // Size changed (fullscreen toggle, rotation): set rendering size and reset zoom
-          +                    if (ivlcVout != null && r - l > 0 && b - t > 0)
+          +                    if (mediaPlayer != null && r - l > 0 && b - t > 0)
           +                        ivlcVout.setWindowSize(r - l, b - t);
           +                    resetZoom();
           +                }
@@ -320,7 +363,29 @@ jobs:
                    }
            
                    /**
-          @@ -369,6 +517,7 @@ public class SurveillanceFragment extends Fragment {
+                    * Starts the playback.
+                    */
+                   public void startPlayback() {
+          -            mediaPlayer.play();
+          +            playRequested = true;
+          +            if (mediaPlayer != null && surfaceAttached && !mediaPlayer.isPlaying())
+          +                mediaPlayer.play();
+                   }
+           
+                   /**
+          @@ -362,13 +548,17 @@ public class SurveillanceFragment extends Fragment {
+                           return;
+                       }
+           
+          +            playRequested = false;
+                       mediaPlayer.stop();
+          -            final IVLCVout vout = mediaPlayer.getVLCVout();
+          -            vout.detachViews();
+          +            if (surfaceAttached) {
+          +                ivlcVout.detachViews();
+          +                surfaceAttached = false;
+          +            }
+                       libvlc.release();
                        libvlc = null;
                        mediaPlayer.release();
                        mediaPlayer = null;
