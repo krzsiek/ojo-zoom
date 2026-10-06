@@ -40,6 +40,87 @@ jobs:
            
                    vectorDrawables.useSupportLibrary = true
            
+          diff --git a/app/src/main/java/it/danieleverducci/ojo/ui/MainActivity.java b/app/src/main/java/it/danieleverducci/ojo/ui/MainActivity.java
+          index 9a332a6..38ae0d3 100644
+          --- a/app/src/main/java/it/danieleverducci/ojo/ui/MainActivity.java
+          +++ b/app/src/main/java/it/danieleverducci/ojo/ui/MainActivity.java
+          @@ -4,10 +4,15 @@ import android.content.Intent;
+           import android.content.pm.ActivityInfo;
+           import android.os.Build;
+           import android.os.Bundle;
+          +import android.os.Handler;
+          +import android.os.Looper;
+          +import android.view.KeyEvent;
+          +import android.view.MotionEvent;
+           import android.view.WindowManager;
+           
+           import androidx.appcompat.app.AppCompatActivity;
+           
+          +import it.danieleverducci.ojo.Settings;
+           import it.danieleverducci.ojo.SharedPreferencesManager;
+           import it.danieleverducci.ojo.databinding.ActivityMainBinding;
+           
+          @@ -17,6 +22,15 @@ public class MainActivity extends AppCompatActivity {
+               private ActivityMainBinding binding;
+               private OnBackButtonPressedListener onBackButtonPressedListener;
+           
+          +    // Settings button auto-hides after a while; any touch or key press shows it again
+          +    private static final long FAB_HIDE_DELAY_MS = 3000;
+          +    private final Handler fabHandler = new Handler(Looper.getMainLooper());
+          +    private final Runnable hideFabRunnable = () -> {
+          +        if (binding != null)
+          +            binding.fab.hide();
+          +    };
+          +    private boolean hasCameras = false;
+          +
+               @Override
+               protected void onCreate(Bundle savedInstanceState) {
+                   super.onCreate(savedInstanceState);
+          @@ -43,6 +57,44 @@ public class MainActivity extends AppCompatActivity {
+                   super.onStart();
+               }
+           
+          +    @Override
+          +    protected void onResume() {
+          +        super.onResume();
+          +        hasCameras = !Settings.fromDisk(this).getCameras().isEmpty();
+          +        showFabTemporarily();
+          +    }
+          +
+          +    @Override
+          +    protected void onPause() {
+          +        super.onPause();
+          +        fabHandler.removeCallbacks(hideFabRunnable);
+          +    }
+          +
+          +    @Override
+          +    public boolean dispatchTouchEvent(MotionEvent ev) {
+          +        if (ev.getActionMasked() == MotionEvent.ACTION_DOWN)
+          +            showFabTemporarily();
+          +        return super.dispatchTouchEvent(ev);
+          +    }
+          +
+          +    @Override
+          +    public boolean dispatchKeyEvent(KeyEvent event) {
+          +        if (event.getAction() == KeyEvent.ACTION_DOWN)
+          +            showFabTemporarily();
+          +        return super.dispatchKeyEvent(event);
+          +    }
+          +
+          +    /**
+          +     * Shows the settings button and schedules its hiding.
+          +     * With no cameras configured it stays visible, as it's the only thing on screen.
+          +     */
+          +    private void showFabTemporarily() {
+          +        fabHandler.removeCallbacks(hideFabRunnable);
+          +        binding.fab.show();
+          +        if (hasCameras)
+          +            fabHandler.postDelayed(hideFabRunnable, FAB_HIDE_DELAY_MS);
+          +    }
+          +
+               public void setOnBackButtonPressedListener(OnBackButtonPressedListener onBackButtonPressedListener) {
+                   this.onBackButtonPressedListener = onBackButtonPressedListener;
+               }
           diff --git a/app/src/main/java/it/danieleverducci/ojo/ui/SurveillanceFragment.java b/app/src/main/java/it/danieleverducci/ojo/ui/SurveillanceFragment.java
           index 7710f0c..1a6bf3d 100644
           --- a/app/src/main/java/it/danieleverducci/ojo/ui/SurveillanceFragment.java
