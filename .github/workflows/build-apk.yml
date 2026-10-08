@@ -41,42 +41,56 @@ jobs:
                    vectorDrawables.useSupportLibrary = true
            
           diff --git a/app/src/main/java/it/danieleverducci/ojo/ui/MainActivity.java b/app/src/main/java/it/danieleverducci/ojo/ui/MainActivity.java
-          index 9a332a6..38ae0d3 100644
+          index 9a332a6..1417d79 100644
           --- a/app/src/main/java/it/danieleverducci/ojo/ui/MainActivity.java
           +++ b/app/src/main/java/it/danieleverducci/ojo/ui/MainActivity.java
-          @@ -4,10 +4,15 @@ import android.content.Intent;
+          @@ -4,10 +4,20 @@ import android.content.Intent;
            import android.content.pm.ActivityInfo;
            import android.os.Build;
            import android.os.Bundle;
           +import android.os.Handler;
           +import android.os.Looper;
+          +import android.view.HapticFeedbackConstants;
           +import android.view.KeyEvent;
           +import android.view.MotionEvent;
+          +import android.view.ViewConfiguration;
            import android.view.WindowManager;
            
            import androidx.appcompat.app.AppCompatActivity;
+          +import androidx.fragment.app.Fragment;
            
+          +import it.danieleverducci.ojo.R;
+          +
           +import it.danieleverducci.ojo.Settings;
            import it.danieleverducci.ojo.SharedPreferencesManager;
            import it.danieleverducci.ojo.databinding.ActivityMainBinding;
            
-          @@ -17,6 +22,15 @@ public class MainActivity extends AppCompatActivity {
+          @@ -17,6 +27,24 @@ public class MainActivity extends AppCompatActivity {
                private ActivityMainBinding binding;
                private OnBackButtonPressedListener onBackButtonPressedListener;
            
-          +    // Settings button auto-hides after a while; any touch or key press shows it again
-          +    private static final long FAB_HIDE_DELAY_MS = 3000;
+          +    // Settings button is hidden while cameras are shown.
+          +    // In grid view (or with a single camera) a long press anywhere shows it for a while.
+          +    private boolean hasCameras = false;
+          +    private static final long FAB_LONG_PRESS_MS = 1500;
+          +    private static final long FAB_VISIBLE_MS = 5000;
           +    private final Handler fabHandler = new Handler(Looper.getMainLooper());
           +    private final Runnable hideFabRunnable = () -> {
-          +        if (binding != null)
+          +        if (binding != null && hasCameras)
           +            binding.fab.hide();
           +    };
-          +    private boolean hasCameras = false;
+          +    private final Runnable longPressRunnable = () -> {
+          +        if (binding == null || isCameraFullscreen())
+          +            return;
+          +        binding.fab.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+          +        showFabTemporarily();
+          +    };
+          +    private float touchDownX, touchDownY;
           +
                @Override
                protected void onCreate(Bundle savedInstanceState) {
                    super.onCreate(savedInstanceState);
-          @@ -43,6 +57,44 @@ public class MainActivity extends AppCompatActivity {
+          @@ -43,6 +71,79 @@ public class MainActivity extends AppCompatActivity {
                    super.onStart();
                }
            
@@ -84,45 +98,80 @@ jobs:
           +    protected void onResume() {
           +        super.onResume();
           +        hasCameras = !Settings.fromDisk(this).getCameras().isEmpty();
-          +        showFabTemporarily();
+          +        fabHandler.removeCallbacks(hideFabRunnable);
+          +        fabHandler.removeCallbacks(longPressRunnable);
+          +        if (hasCameras)
+          +            binding.fab.hide();
+          +        else
+          +            binding.fab.show();   // Nothing to watch yet: settings button is the only thing on screen
           +    }
           +
           +    @Override
           +    protected void onPause() {
           +        super.onPause();
           +        fabHandler.removeCallbacks(hideFabRunnable);
+          +        fabHandler.removeCallbacks(longPressRunnable);
           +    }
           +
           +    @Override
           +    public boolean dispatchTouchEvent(MotionEvent ev) {
-          +        if (ev.getActionMasked() == MotionEvent.ACTION_DOWN)
-          +            showFabTemporarily();
-          +        return super.dispatchTouchEvent(ev);
+          +        if (hasCameras) {
+          +            switch (ev.getActionMasked()) {
+          +                case MotionEvent.ACTION_DOWN:
+          +                    touchDownX = ev.getX();
+          +                    touchDownY = ev.getY();
+          +                    fabHandler.removeCallbacks(longPressRunnable);
+          +                    fabHandler.postDelayed(longPressRunnable, FAB_LONG_PRESS_MS);
+          +                    break;
+          +                case MotionEvent.ACTION_MOVE:
+          +                    int slop = ViewConfiguration.get(this).getScaledTouchSlop();
+          +                    if (Math.abs(ev.getX() - touchDownX) > slop || Math.abs(ev.getY() - touchDownY) > slop)
+          +                        fabHandler.removeCallbacks(longPressRunnable);
+          +                    break;
+          +                case MotionEvent.ACTION_POINTER_DOWN:   // Second finger: it's a pinch, not a long press
+          +                case MotionEvent.ACTION_UP:
+          +                case MotionEvent.ACTION_CANCEL:
+          +                    fabHandler.removeCallbacks(longPressRunnable);
+          +                    break;
+          +            }
+          +        }
+          +        boolean handled = super.dispatchTouchEvent(ev);
+          +        // A tap may have just opened a camera fullscreen: no button there
+          +        if (hasCameras && isCameraFullscreen())
+          +            hideFabNow();
+          +        return handled;
           +    }
           +
           +    @Override
           +    public boolean dispatchKeyEvent(KeyEvent event) {
-          +        if (event.getAction() == KeyEvent.ACTION_DOWN)
+          +        // Remote control (Android TV): any key shows the button in grid view
+          +        if (hasCameras && event.getAction() == KeyEvent.ACTION_DOWN && !isCameraFullscreen()
+          +                && binding.fab.getVisibility() != android.view.View.VISIBLE)
           +            showFabTemporarily();
           +        return super.dispatchKeyEvent(event);
           +    }
           +
-          +    /**
-          +     * Shows the settings button and schedules its hiding.
-          +     * With no cameras configured it stays visible, as it's the only thing on screen.
-          +     */
+          +    private boolean isCameraFullscreen() {
+          +        Fragment f = getSupportFragmentManager().findFragmentById(R.id.fragment_surveillance);
+          +        return f instanceof SurveillanceFragment && ((SurveillanceFragment) f).isCameraFullscreen();
+          +    }
+          +
           +    private void showFabTemporarily() {
           +        fabHandler.removeCallbacks(hideFabRunnable);
           +        binding.fab.show();
-          +        if (hasCameras)
-          +            fabHandler.postDelayed(hideFabRunnable, FAB_HIDE_DELAY_MS);
+          +        fabHandler.postDelayed(hideFabRunnable, FAB_VISIBLE_MS);
+          +    }
+          +
+          +    private void hideFabNow() {
+          +        fabHandler.removeCallbacks(hideFabRunnable);
+          +        binding.fab.hide();
           +    }
           +
                public void setOnBackButtonPressedListener(OnBackButtonPressedListener onBackButtonPressedListener) {
                    this.onBackButtonPressedListener = onBackButtonPressedListener;
                }
           diff --git a/app/src/main/java/it/danieleverducci/ojo/ui/SurveillanceFragment.java b/app/src/main/java/it/danieleverducci/ojo/ui/SurveillanceFragment.java
-          index 7710f0c..1a6bf3d 100644
+          index 7710f0c..dff9e3f 100644
           --- a/app/src/main/java/it/danieleverducci/ojo/ui/SurveillanceFragment.java
           +++ b/app/src/main/java/it/danieleverducci/ojo/ui/SurveillanceFragment.java
           @@ -2,20 +2,24 @@ package it.danieleverducci.ojo.ui;
@@ -185,7 +234,7 @@ jobs:
            
                    cameraViews.add(cv);
                    return cv;
-          @@ -284,73 +297,246 @@ public class SurveillanceFragment extends Fragment {
+          @@ -284,73 +297,253 @@ public class SurveillanceFragment extends Fragment {
                    if (index < 0 || cameraViews.size() <= index) {
                        return;
                    }
@@ -205,6 +254,13 @@ jobs:
                    }
                }
            
+          +    /**
+          +     * True when one camera, picked from the grid, fills the screen
+          +     */
+          +    public boolean isCameraFullscreen() {
+          +        return fullscreenCameraView && cameraViews.size() > 1;
+          +    }
+          +
           +    /**
           +     * Zoom is allowed only when a single camera fills the screen
           +     */
@@ -454,7 +510,7 @@ jobs:
                    }
            
                    /**
-          @@ -362,13 +548,17 @@ public class SurveillanceFragment extends Fragment {
+          @@ -362,13 +555,17 @@ public class SurveillanceFragment extends Fragment {
                            return;
                        }
            
