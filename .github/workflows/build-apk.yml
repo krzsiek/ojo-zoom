@@ -1,7 +1,9 @@
 name: Build APK
 
 # Every push builds the APK and keeps it as a workflow artifact.
-# Pushing a tag like v0.2.0 also publishes a GitHub release with the APK attached.
+# A push to stable whose versionName has no release yet publishes release v<versionName>
+# (the tag is created by the release step) with the APK attached.
+# Creating a tag/release by hand still works: the tag push attaches the APK to it.
 on:
   push:
   workflow_dispatch:
@@ -66,6 +68,7 @@ jobs:
       - name: Name the APK
         run: |
           version=$(grep -m1 versionName app/build.gradle | sed -E 's/.*"(.*)".*/\1/')
+          echo "VERSION=$version" >> "$GITHUB_ENV"
           mkdir -p dist
           cp app/build/outputs/apk/release/*.apk "dist/ojo-zoom-$version.apk"
           ls -la dist
@@ -82,9 +85,25 @@ jobs:
           name: ojo-zoom-apk
           path: dist/*.apk
 
-      - name: Publish GitHub release
+      - name: Check if this version is already released
+        if: github.ref == 'refs/heads/stable'
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" > /dev/null; then
+            echo "v$VERSION already released, skipping"
+          else
+            echo "RELEASE_TAG=v$VERSION" >> "$GITHUB_ENV"
+          fi
+
+      - name: Tag pushed by hand
         if: startsWith(github.ref, 'refs/tags/v')
+        run: echo "RELEASE_TAG=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+
+      - name: Publish GitHub release
+        if: env.RELEASE_TAG != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Ojo Zoom ${{ env.VERSION }}
           files: dist/*.apk
           body_path: RELEASE_NOTES.md

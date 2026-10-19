@@ -33,7 +33,7 @@ To make this possible the video is rendered on a `TextureView` instead of a `Sur
 
 ### Building and releasing
 - Every push builds the APK on GitHub Actions (`Build APK` workflow); it is kept as the `ojo-zoom-apk` artifact of the run.
-- Pushing a tag `vX.Y.Z` also publishes a GitHub release with the APK attached and `RELEASE_NOTES.md` as its description.
+- A push to `stable` with a new `versionName` publishes GitHub release `v<versionName>` with the APK attached and `RELEASE_NOTES.md` as its description.
 - Release APKs are signed with the key stored in the repository secrets `OJO_KEYSTORE_BASE64`, `OJO_KEYSTORE_PASSWORD`, `OJO_KEY_ALIAS`, `OJO_KEY_PASSWORD`. Without them the APK is signed with a throwaway debug key and cannot update a previously installed copy.
 - Local build: `./gradlew assembleRelease` (JDK 17, Android SDK 33).
 

@@ -9,7 +9,8 @@
 ## Budowanie
 - Tylko przez GitHub Actions (`.github/workflows/build-apk.yml`); w kontenerze Claude nie ma Android SDK.
 - Każdy push buduje `assembleRelease`, APK jako artefakt `ojo-zoom-apk`.
-- Tag `vX.Y.Z` publikuje release z APK; opis release bierze z `RELEASE_NOTES.md` (zaktualizuj przed tagiem).
+- Gałąź domyślna to `stable` (nie ma master). Push na `stable` z nowym `versionName` sam publikuje release `v<versionName>` z APK (tag tworzy workflow). Opis z `RELEASE_NOTES.md` (zaktualizuj przed pushem).
+- Proxy kontenera zrywa `git push` tagów; dlatego tag robi workflow, nie Claude. Push gałęzi działa.
 - Przed releasem podbij `versionCode` i `versionName` w `app/build.gradle` i dodaj `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`.
 - Podpis: sekrety repo `OJO_KEYSTORE_BASE64`, `OJO_KEYSTORE_PASSWORD`, `OJO_KEY_ALIAS`, `OJO_KEY_PASSWORD`. Bez nich APK ma klucz debug z runnera i nie zaktualizuje zainstalowanej wersji.
 - Stan CI można odczytać bez tokena: `curl https://api.github.com/repos/krzsiek/ojo-zoom/actions/runs`.
