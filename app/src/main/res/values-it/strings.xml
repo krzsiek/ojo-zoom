@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Ojo</string>
+    <string name="app_name">Ojo Zoom</string>
     <!-- Strings used for fragments for navigation -->
     <string name="first_fragment_label">First Fragment</string>
     <string name="second_fragment_label">Second Fragment</string>
@@ -22,7 +22,10 @@
     <string name="menuitem_info">Info</string>
     <string name="menuitem_add_camera">Aggiungi</string>
 
-    <string name="app_info_title">Informazioni su Ojo</string>
+    <string name="app_info_title">Informazioni su Ojo Zoom</string>
+    <string name="app_info_version">Versione %1$s</string>
+    <string name="app_info_fork_desc">Ojo Zoom è un fork di Ojo con funzioni aggiuntive:\n• zoom con due dita e doppio tocco sulla telecamera a schermo intero, trascina per spostarti, indietro annulla lo zoom\n• il pulsante delle impostazioni è nascosto mentre si guardano le telecamere: una pressione lunga (1,5 s) sulla griglia, o un tasto qualsiasi del telecomando su Android TV, lo mostra per 5 secondi</string>
+    <string name="app_info_fork_repo_desc">Codice sorgente e release di Ojo Zoom: https://github.com/krzsiek/ojo-zoom</string>
     <string name="app_info_creator_desc">Creato da Daniele Verducci.</string>
     <string name="app_info_license_desc">Questa app è rilasciata sotto licenza GNU GENERAL PUBLIC LICENSE v3+. Puoi ottenerne una copia qui: https://raw.githubusercontent.com/penguin86/ojo/master/LICENSE</string>
     <string name="app_info_repo_desc">Puoi trovare il codice sorgente al repository: https://github.com/penguin86/ojo</string>

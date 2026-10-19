@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Ojo</string>
+    <string name="app_name">Ojo Zoom</string>
     <!-- Strings used for fragments for navigation -->
     <string name="first_fragment_label">Первый Фрагмент</string>
     <string name="second_fragment_label">Второй Фрагмент</string>
@@ -22,7 +22,10 @@
     <string name="menuitem_info">Инфо</string>
     <string name="menuitem_add_camera">Добавить</string>
 
-    <string name="app_info_title">О программе</string>
+    <string name="app_info_title">О программе Ojo Zoom</string>
+    <string name="app_info_version">Версия %1$s</string>
+    <string name="app_info_fork_desc">Ojo Zoom — это форк Ojo с дополнительными функциями:\n• масштабирование двумя пальцами и двойным касанием на полноэкранной камере, перемещение пальцем, «Назад» сбрасывает масштаб\n• кнопка настроек скрыта при просмотре камер: долгое нажатие (1,5 с) на сетке или любая кнопка пульта на Android TV показывает её на 5 секунд</string>
+    <string name="app_info_fork_repo_desc">Исходный код и релизы Ojo Zoom: https://github.com/krzsiek/ojo-zoom</string>
     <string name="app_info_creator_desc">Автор: Daniele Verducci.</string>
     <string name="app_info_license_desc">Это приложение лицензировано в соответствии с GNU GENERAL PUBLIC LICENSE v3+. Ознакомьтесь тут: https://raw.githubusercontent.com/penguin86/ojo/master/LICENSE</string>
     <string name="app_info_repo_desc">Исходный код в репозитории на GitHub:: https://github.com/penguin86/ojo</string>

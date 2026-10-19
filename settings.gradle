@@ -1,2 +1,3 @@
 rootProject.name = "Ojo"
 include ':app'
+include ':libvlc'

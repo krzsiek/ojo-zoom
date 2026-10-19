@@ -1,0 +1,1 @@
+Ojo Zoom: pinch and double tap zoom on a fullscreen camera, hidden settings button (long press to show), info screen with fork features and version, ARM only build, Android 5.0+.

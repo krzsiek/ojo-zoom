@@ -1,0 +1,27 @@
+// libVLC 2.1.12 (from https://github.com/mrmaffen/vlc-android-sdk, commit 769f365).
+// It was only published on JCenter, which is shut down, so it is vendored here.
+// Only ARM native libraries are kept (arm64-v8a, armeabi-v7a).
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    namespace 'org.videolan.libvlc'
+    compileSdkVersion 33
+
+    defaultConfig {
+        minSdkVersion 21
+        targetSdkVersion 33
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    lintOptions {
+        abortOnError false
+    }
+}
+
+dependencies {
+    implementation 'androidx.annotation:annotation:1.6.0'
+}

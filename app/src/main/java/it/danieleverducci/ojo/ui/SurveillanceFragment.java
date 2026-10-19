@@ -2,20 +2,24 @@ package it.danieleverducci.ojo.ui;
 
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.SurfaceTexture;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.GestureDetector;
 import android.view.LayoutInflater;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
+import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
+import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 
+import androidx.core.content.ContextCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -106,6 +110,13 @@ public class SurveillanceFragment extends Fragment {
         ((MainActivity)getActivity()).setOnBackButtonPressedListener(new OnBackButtonPressedListener() {
             @Override
             public boolean onBackPressed() {
+                // First back press while zoomed: just reset the zoom
+                for (CameraView cv : cameraViews) {
+                    if (cv.isZoomed()) {
+                        cv.resetZoom();
+                        return true;
+                    }
+                }
                 if(fullscreenCameraView && cameraViews.size() > 1) {
                     fullscreenCameraView = false;
                     showAllCameras();
@@ -216,6 +227,8 @@ public class SurveillanceFragment extends Fragment {
     }
 
     protected void showAllCameras() {
+        for (CameraView cv : cameraViews)
+            cv.resetZoom();
         for (int i = 0; i < binding.gridRowContainer.getChildCount(); i++) {
             LinearLayout row = (LinearLayout) binding.gridRowContainer.getChildAt(i);
             row.setLayoutParams(rowLayoutParams);
@@ -233,7 +246,7 @@ public class SurveillanceFragment extends Fragment {
         );
 
         // Add to layout
-        rowContainer.addView(cv.surfaceView, cameraViewLayoutParams);
+        rowContainer.addView(cv.container, cameraViewLayoutParams);
 
         cameraViews.add(cv);
         return cv;
@@ -284,73 +297,253 @@ public class SurveillanceFragment extends Fragment {
         if (index < 0 || cameraViews.size() <= index) {
             return;
         }
-        hideAllCameraViewsButNot(cameraViews.get(index).surfaceView);
+        fullscreenCameraView = true;
+        hideAllCameraViewsButNot(cameraViews.get(index).container);
     }
 
     private void expandByName(String name) {
         for(CameraView cameraView: cameraViews) {
             if (cameraView.camera.getName().equals(name)) {
-                hideAllCameraViewsButNot(cameraView.surfaceView);
+                fullscreenCameraView = true;
+                hideAllCameraViewsButNot(cameraView.container);
                 break;
             }
         }
     }
 
     /**
+     * True when one camera, picked from the grid, fills the screen
+     */
+    public boolean isCameraFullscreen() {
+        return fullscreenCameraView && cameraViews.size() > 1;
+    }
+
+    /**
+     * Zoom is allowed only when a single camera fills the screen
+     */
+    private boolean isZoomAllowed() {
+        return fullscreenCameraView || cameraViews.size() == 1;
+    }
+
+    /**
      * Contains all entities (views and java entities) related to a camera stream viewer
      */
     private class CameraView {
-        protected SurfaceView surfaceView;
+        final static private float MAX_ZOOM = 8f;
+        final static private float DOUBLE_TAP_ZOOM = 2.5f;
+
+        protected FrameLayout container;   // Grid cell: handles focus, clicks and gestures, clips zoomed video
+        protected TextureView videoView;   // Video output (TextureView supports scale/translation, SurfaceView doesn't)
         protected MediaPlayer mediaPlayer;
         protected IVLCVout ivlcVout;
         protected Camera camera;
         protected LibVLC libvlc;
 
+        private float zoom = 1f;
+        private float panX = 0f;
+        private float panY = 0f;
+        private boolean tapAlreadyHandled = false;
+        private boolean surfaceAttached = false;   // VLC output connected to the TextureView surface
+        private boolean playRequested = false;
+
         public CameraView(Context context, Camera camera) {
             this.camera = camera;
             this.libvlc = new LibVLC(context, new ArrayList<>(Arrays.asList(VLC_OPTIONS)));
 
-            surfaceView = new SurfaceView(context);
-            surfaceView.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
+            container = new FrameLayout(context);
+            container.setClipChildren(true);
+            container.setFocusable(true);
+            // Foreground, not background: the video would cover a background drawable
+            container.setOnFocusChangeListener((view, hasFocus) -> container.setForeground(
+                    hasFocus ? ContextCompat.getDrawable(context, R.drawable.focus_border) : null));
 
-                }
-            });
-            surfaceView.setOnFocusChangeListener((view, hasFocus) -> view.setBackgroundResource(hasFocus ? R.drawable.focus_border : 0));
-            SurfaceHolder holder = surfaceView.getHolder();
+            videoView = new TextureView(context);
+            videoView.setPivotX(0f);
+            videoView.setPivotY(0f);
+            videoView.setKeepScreenOn(true);
+            container.addView(videoView, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+            ));
 
-            holder.setKeepScreenOn(true);
+            setupGestures(context);
 
             // Create media player
             mediaPlayer = new MediaPlayer(libvlc);
 
-            // Set up video output
             ivlcVout = mediaPlayer.getVLCVout();
-            ivlcVout.setVideoView(surfaceView);
-            ivlcVout.attachViews();
 
-            // Load media and start playing
+            // Load media
             Media m = new Media(libvlc, Uri.parse(camera.getRtspUrl()));
             mediaPlayer.setMedia(m);
 
+            // Video output: connect VLC only once the TextureView surface really exists
+            // (libVLC 2.x crashes if given a TextureView whose surface isn't created yet)
+            videoView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
+                @Override
+                public void onSurfaceTextureAvailable(SurfaceTexture surfaceTexture, int width, int height) {
+                    if (mediaPlayer == null || surfaceAttached)
+                        return;
+                    ivlcVout.setVideoSurface(surfaceTexture);
+                    ivlcVout.attachViews();
+                    ivlcVout.setWindowSize(width, height);
+                    surfaceAttached = true;
+                    if (playRequested)
+                        mediaPlayer.play();
+                }
+
+                @Override
+                public void onSurfaceTextureSizeChanged(SurfaceTexture surfaceTexture, int width, int height) {
+                    if (mediaPlayer != null && width > 0 && height > 0)
+                        ivlcVout.setWindowSize(width, height);
+                }
+
+                @Override
+                public boolean onSurfaceTextureDestroyed(SurfaceTexture surfaceTexture) {
+                    if (mediaPlayer != null && surfaceAttached) {
+                        mediaPlayer.stop();
+                        ivlcVout.detachViews();
+                    }
+                    surfaceAttached = false;
+                    return true;
+                }
+
+                @Override
+                public void onSurfaceTextureUpdated(SurfaceTexture surfaceTexture) {
+                }
+            });
+
             // Register for view resize events
-            final ViewTreeObserver observer= surfaceView.getViewTreeObserver();
-            observer.addOnGlobalLayoutListener(() -> {
-                // Set rendering size
-                ivlcVout.setWindowSize(surfaceView.getWidth(), surfaceView.getHeight());
+            container.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+                if ((r - l) != (or - ol) || (b - t) != (ob - ot)) {
+                    // Size changed (fullscreen toggle, rotation): set rendering size and reset zoom
+                    if (mediaPlayer != null && r - l > 0 && b - t > 0)
+                        ivlcVout.setWindowSize(r - l, b - t);
+                    resetZoom();
+                }
             });
         }
 
+        private void setupGestures(Context context) {
+            final ScaleGestureDetector scaleDetector = new ScaleGestureDetector(context,
+                    new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                        @Override
+                        public boolean onScale(ScaleGestureDetector detector) {
+                            if (!isZoomAllowed())
+                                return false;
+                            zoomBy(detector.getScaleFactor(), detector.getFocusX(), detector.getFocusY());
+                            return true;
+                        }
+                    });
+
+            final GestureDetector gestureDetector = new GestureDetector(context,
+                    new GestureDetector.SimpleOnGestureListener() {
+                        @Override
+                        public boolean onDown(MotionEvent e) {
+                            return true;
+                        }
+
+                        @Override
+                        public boolean onSingleTapUp(MotionEvent e) {
+                            // In grid mode toggle immediately (no double tap there)
+                            if (!isZoomAllowed()) {
+                                tapAlreadyHandled = true;
+                                container.performClick();
+                                return true;
+                            }
+                            return false;
+                        }
+
+                        @Override
+                        public boolean onSingleTapConfirmed(MotionEvent e) {
+                            // Ignore single taps while zoomed to avoid leaving fullscreen by accident
+                            if (!tapAlreadyHandled && !isZoomed())
+                                container.performClick();
+                            return true;
+                        }
+
+                        @Override
+                        public boolean onDoubleTap(MotionEvent e) {
+                            if (!isZoomAllowed())
+                                return false;
+                            if (isZoomed())
+                                resetZoom();
+                            else
+                                zoomBy(DOUBLE_TAP_ZOOM, e.getX(), e.getY());
+                            return true;
+                        }
+
+                        @Override
+                        public boolean onScroll(MotionEvent e1, MotionEvent e2, float distanceX, float distanceY) {
+                            if (!isZoomed())
+                                return false;
+                            panX -= distanceX;
+                            panY -= distanceY;
+                            applyTransform();
+                            return true;
+                        }
+                    });
+
+            container.setOnTouchListener((v, event) -> {
+                if (event.getActionMasked() == MotionEvent.ACTION_DOWN)
+                    tapAlreadyHandled = false;
+                scaleDetector.onTouchEvent(event);
+                gestureDetector.onTouchEvent(event);
+                return true;
+            });
+        }
+
+        /**
+         * Multiplies the zoom by factor, keeping the point (focusX, focusY) still on screen
+         */
+        private void zoomBy(float factor, float focusX, float focusY) {
+            float newZoom = Math.max(1f, Math.min(MAX_ZOOM, zoom * factor));
+            float realFactor = newZoom / zoom;
+            panX = focusX - realFactor * (focusX - panX);
+            panY = focusY - realFactor * (focusY - panY);
+            zoom = newZoom;
+            applyTransform();
+        }
+
+        private void applyTransform() {
+            int w = container.getWidth();
+            int h = container.getHeight();
+            // Do not allow panning outside the image
+            panX = Math.max(w - w * zoom, Math.min(0f, panX));
+            panY = Math.max(h - h * zoom, Math.min(0f, panY));
+            if (zoom <= 1f) {
+                zoom = 1f;
+                panX = 0f;
+                panY = 0f;
+            }
+            videoView.setScaleX(zoom);
+            videoView.setScaleY(zoom);
+            videoView.setTranslationX(panX);
+            videoView.setTranslationY(panY);
+        }
+
+        public boolean isZoomed() {
+            return zoom > 1.001f;
+        }
+
+        public void resetZoom() {
+            zoom = 1f;
+            panX = 0f;
+            panY = 0f;
+            applyTransform();
+        }
+
         public void setOnClickListener(View.OnClickListener listener) {
-            surfaceView.setOnClickListener(listener);
+            container.setOnClickListener(listener);
         }
 
         /**
          * Starts the playback.
          */
         public void startPlayback() {
-            mediaPlayer.play();
+            playRequested = true;
+            if (mediaPlayer != null && surfaceAttached && !mediaPlayer.isPlaying())
+                mediaPlayer.play();
         }
 
         /**
@@ -362,13 +555,17 @@ public class SurveillanceFragment extends Fragment {
                 return;
             }
 
+            playRequested = false;
             mediaPlayer.stop();
-            final IVLCVout vout = mediaPlayer.getVLCVout();
-            vout.detachViews();
+            if (surfaceAttached) {
+                ivlcVout.detachViews();
+                surfaceAttached = false;
+            }
             libvlc.release();
             libvlc = null;
             mediaPlayer.release();
             mediaPlayer = null;
+            ivlcVout = null;
         }
     }
 }

@@ -1,5 +1,46 @@
 ![Ojo Logo](/media/icon.png)
 
+# Ojo Zoom
+
+**Ojo Zoom** is a fork of [Ojo](https://github.com/penguin86/ojo), the FLOSS RTSP surveillance camera viewer for Android, with a few features the original lacks.
+It installs next to the original Ojo (package `it.danieleverducci.ojo.zoom`), so both can be used on the same device.
+
+[**Download the latest APK**](https://github.com/krzsiek/ojo-zoom/releases/latest)
+
+## What's different from Ojo
+
+### Zoom
+- **Pinch to zoom** (up to 8x) on a camera that fills the screen: a single camera, or one opened fullscreen from the grid.
+- **Double tap** zooms to 2.5x on the tapped point; double tap again to zoom back out.
+- **Drag** with one finger to move around the zoomed picture (it never leaves the image edges).
+- **Back** first resets the zoom, the next back returns to the grid as usual.
+- Single taps are ignored while zoomed, so you don't leave fullscreen by accident.
+- Zoom is reset when going back to the grid, rotating the screen or resizing the view.
+
+To make this possible the video is rendered on a `TextureView` instead of a `SurfaceView`.
+
+### Hidden settings button
+- While cameras are shown the round settings button is hidden, so it never covers the picture.
+- **Long press (1.5 s)** anywhere in the grid view (or on a single camera) shows it for 5 seconds.
+- On **Android TV**, any remote key in the grid view shows it for 5 seconds.
+- In a camera opened fullscreen from the grid the button stays hidden; press back to return to the grid first.
+- With no cameras configured the button is always visible.
+
+### Build and devices
+- ARM only (`arm64-v8a` and `armeabi-v7a` in one APK): phones, tablets and Android TV boxes. No x86 builds.
+- Android 5.0 (API 21) or newer.
+- libVLC 2.1.12 is vendored in the `libvlc` module, because its only Maven repository (JCenter) is shut down.
+
+### Building and releasing
+- Every push builds the APK on GitHub Actions (`Build APK` workflow); it is kept as the `ojo-zoom-apk` artifact of the run.
+- Pushing a tag `vX.Y.Z` also publishes a GitHub release with the APK attached and `RELEASE_NOTES.md` as its description.
+- Release APKs are signed with the key stored in the repository secrets `OJO_KEYSTORE_BASE64`, `OJO_KEYSTORE_PASSWORD`, `OJO_KEY_ALIAS`, `OJO_KEY_PASSWORD`. Without them the APK is signed with a throwaway debug key and cannot update a previously installed copy.
+- Local build: `./gradlew assembleRelease` (JDK 17, Android SDK 33).
+
+---
+
+*The original Ojo README follows.*
+
 # Ojo: the FLOSS RTSP Surveillance camera viewer for Android
 
 > This project was moved to [my private git server](https://git.ichibi.eu/penguin86/ojo) . This repository may not be up to date.

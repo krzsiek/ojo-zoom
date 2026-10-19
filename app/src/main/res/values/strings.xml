@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Ojo</string>
+    <string name="app_name">Ojo Zoom</string>
     <!-- Strings used for fragments for navigation -->
     <string name="first_fragment_label">First Fragment</string>
     <string name="second_fragment_label">Second Fragment</string>
@@ -21,7 +21,10 @@
     <string name="menuitem_info">Info</string>
     <string name="menuitem_add_camera">Add</string>
 
-    <string name="app_info_title">About Ojo</string>
+    <string name="app_info_title">About Ojo Zoom</string>
+    <string name="app_info_version">Version %1$s</string>
+    <string name="app_info_fork_desc">Ojo Zoom is a fork of Ojo with extra features:\n• pinch-to-zoom and double tap zoom on a fullscreen camera, drag to pan, back resets the zoom\n• the settings button is hidden while cameras are shown: long press (1.5 s) anywhere in the grid, or any remote key on Android TV, shows it for 5 seconds</string>
+    <string name="app_info_fork_repo_desc">Ojo Zoom source code and releases: https://github.com/krzsiek/ojo-zoom</string>
     <string name="app_info_creator_desc">Created by Daniele Verducci.</string>
     <string name="app_info_license_desc">This application is licensed under the GNU GENERAL PUBLIC LICENSE v3+. You can obtain a copy here: https://raw.githubusercontent.com/penguin86/ojo/master/LICENSE</string>
     <string name="app_info_repo_desc">The source code can be obtained at the GitHub repository: https://github.com/penguin86/ojo</string>
