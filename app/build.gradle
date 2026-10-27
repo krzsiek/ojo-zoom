@@ -44,13 +44,19 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
     }
     buildFeatures {
         viewBinding true
     }
     namespace 'it.danieleverducci.ojo'
+}
+
+// libvlc-all declares minCompileSdk 36, but only needs API 33 at compile time here:
+// skip the AAR metadata check instead of moving the whole build to AGP 8.
+tasks.matching { it.name.startsWith('check') && it.name.endsWith('AarMetadata') }.configureEach {
+    enabled = false
 }
 
 dependencies {
@@ -59,7 +65,10 @@ dependencies {
     implementation 'com.google.android.material:material:1.8.0'
     implementation 'androidx.navigation:navigation-fragment:2.5.3'
     implementation 'androidx.navigation:navigation-ui:2.5.3'
-    implementation project(':libvlc')
+    // libVLC 3 from Maven Central. Its own Kotlin dependency is not used by the Java API.
+    implementation('org.videolan.android:libvlc-all:3.7.7') {
+        exclude group: 'org.jetbrains.kotlin'
+    }
     implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.0')
     implementation 'androidx.legacy:legacy-support-v4:1.0.0'
     implementation 'androidx.recyclerview:recyclerview:1.2.1'

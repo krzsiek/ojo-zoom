@@ -25,7 +25,7 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.fragment.app.Fragment;
 
-import org.videolan.libvlc.IVLCVout;
+import org.videolan.libvlc.interfaces.IVLCVout;
 import org.videolan.libvlc.LibVLC;
 import org.videolan.libvlc.Media;
 import org.videolan.libvlc.MediaPlayer;
@@ -52,7 +52,6 @@ public class SurveillanceFragment extends Fragment {
             "--aout=opensles",
             //"--audio-time-stretch", // time stretching
             //"-vvv", // verbosity
-            "--avcodec-codec=h264",
             //"--file-logging",
             //"--logfile=vlc-log.txt"
     };
