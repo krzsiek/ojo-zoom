@@ -1,0 +1,1 @@
+Snapshots and recordings (with a max length) from a fullscreen camera, portrait layout with cameras one under the other, swipe between fullscreen cameras, libVLC 3.7.

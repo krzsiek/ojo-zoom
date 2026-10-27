@@ -19,6 +19,8 @@
 - applicationId `it.danieleverducci.ojo.zoom` (instaluje się obok oryginału); namespace kodu zostaje `it.danieleverducci.ojo`.
 - Tylko ARM (`arm64-v8a`, `armeabi-v7a`) w jednym APK, minSdk 21. Bez x86.
   armeabi-v7a zostaje, bo wiele boksów Android TV ma 32-bitowy system mimo 64-bitowego procesora.
-- libVLC 2.1.12 jest w module `libvlc` (z mrmaffen/vlc-android-sdk @769f365, `android.support.annotation` zamienione na `androidx.annotation`), bo JCenter nie działa.
-- Wideo renderowane na `TextureView` (SurfaceView nie obsługuje skalowania). VLC podpinany dopiero w `onSurfaceTextureAvailable`, inaczej libVLC 2.x się wywraca.
-- Przycisk ustawień (FAB) ukrywany w `MainActivity`; zoom i gesty w `SurveillanceFragment.CameraView`.
+- libVLC 3.7.7 z Maven Central (`org.videolan.android:libvlc-all`, od v0.3; wcześniej 2.1.12 bez sout, nie umiało nagrywać). AAR deklaruje minCompileSdk 36, więc w `app/build.gradle` wyłączony jest task `check*AarMetadata` (zostajemy na AGP 7.4 / compileSdk 33). Kotlin z libvlc wykluczony (Java API go nie używa).
+- Wideo renderowane na `TextureView` (SurfaceView nie obsługuje skalowania). VLC podpinany dopiero w `onSurfaceTextureAvailable`. Proporcje obrazu trzyma `TextureView.setTransform` z rozmiaru z `OnNewVideoLayoutListener`.
+- Układ kamer: `CameraGridLayout` (siatka w poziomie, lista 16:9 w pionie w ScrollView, fullscreen = jedna kamera, reszta 1x1 px). Widoki nie zmieniają rodzica, więc obrót nie restartuje strumieni.
+- Snapshot: `TextureView.getBitmap(w, h)` w rozdzielczości wideo. Nagrywanie: `MediaPlayer.record(dir)` do katalogu aplikacji, po zakończeniu `MediaSaver` przenosi plik do Movies/OjoZoom (MediaStore na 10+, plik + skaner na 5-9).
+- Przyciski (ustawienia, snapshot, nagrywanie) ukrywane w `MainActivity`; zoom, gesty i przesuwanie kamer w `SurveillanceFragment.CameraView`.

@@ -19,17 +19,33 @@ It installs next to the original Ojo (package `it.danieleverducci.ojo.zoom`), so
 
 To make this possible the video is rendered on a `TextureView` instead of a `SurfaceView`.
 
+### Swipe between cameras
+- On a camera opened fullscreen from the grid, **swipe left** for the next camera and **swipe right** for the previous one (it wraps around).
+- Only without zoom: while zoomed, dragging moves the picture as before.
+
+### Portrait layout
+- With "Allow screen rotation" enabled, a portrait screen shows the cameras **one under the other**, full width, 16:9. Scroll down when they don't fit.
+- Landscape keeps the automatic grid. Rotating doesn't restart the streams.
+- A camera opened fullscreen in portrait stays in portrait, fitted to the width; zoom works as usual.
+
+### Snapshots and recordings
+- On a camera filling the screen (opened fullscreen, or the only camera), **long press (1.5 s)** shows a camera and a video button. On Android TV, **long press OK** on the remote. They hide again after 5 seconds.
+- **Snapshot**: saves the full current frame as JPEG to `Pictures/OjoZoom`, with a white flash.
+- **Record**: saves the stream as it comes from the camera (no transcoding, so no extra CPU load) to `Movies/OjoZoom`. While recording the button is red, stays on screen and shows the elapsed time; press it again to stop.
+- Safety limits: a recording stops by itself after the **max recording length** (settings menu, 1 to 60 minutes, default 10), when free space gets low (it doesn't start below 1 GB free), and when leaving the camera (back, swipe, leaving the app). Nothing is ever deleted automatically.
+- Files appear in the gallery. Android 6 to 9 ask for the storage permission the first time; Android 10+ need no permission.
+
 ### Hidden settings button
 - While cameras are shown the round settings button is hidden, so it never covers the picture.
 - **Long press (1.5 s)** anywhere in the grid view (or on a single camera) shows it for 5 seconds.
 - On **Android TV**, any remote key in the grid view shows it for 5 seconds.
-- In a camera opened fullscreen from the grid the button stays hidden; press back to return to the grid first.
+- In a camera opened fullscreen from the grid the long press shows the snapshot and record buttons instead; press back to return to the grid for the settings.
 - With no cameras configured the button is always visible.
 
 ### Build and devices
 - ARM only (`arm64-v8a` and `armeabi-v7a` in one APK): phones, tablets and Android TV boxes. No x86 builds.
 - Android 5.0 (API 21) or newer.
-- libVLC 2.1.12 is vendored in the `libvlc` module, because its only Maven repository (JCenter) is shut down.
+- libVLC 3.7.7 from Maven Central (`org.videolan.android:libvlc-all`). It replaced libVLC 2.1.12, which was built without stream output and could not record. Hardware decoding and H.265 cameras now work too.
 
 ### Building and releasing
 - Every push builds the APK on GitHub Actions (`Build APK` workflow); it is kept as the `ojo-zoom-apk` artifact of the run.

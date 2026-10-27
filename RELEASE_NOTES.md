@@ -1,10 +1,9 @@
-## Ojo Zoom 0.2.0
+## Ojo Zoom 0.3.0
 
-First proper release of Ojo Zoom, now built from the code in this repository.
+- **Snapshots and recordings**: long press a camera filling the screen (or long press OK on the remote) to show the camera and video buttons. Snapshots go to `Pictures/OjoZoom`, recordings to `Movies/OjoZoom`.
+- Recordings save the camera stream as is (no transcoding). The record button turns red and shows the elapsed time. A recording stops by itself after the max length set in the settings (default 10 minutes), when storage gets low, or when leaving the camera.
+- **Portrait layout**: with screen rotation allowed, a portrait screen shows the cameras one under the other and scrolls when they don't fit. Rotating no longer restarts the streams.
+- **Swipe** left or right on a fullscreen camera (not zoomed) to show the next or previous camera.
+- Updated to libVLC 3.7.7: hardware decoding and H.265 cameras.
 
-- Pinch to zoom, double tap zoom and pan on a fullscreen camera; back resets the zoom.
-- Settings button hidden while watching cameras; long press in the grid (or any remote key on Android TV) shows it for 5 seconds.
-- Info screen describes the Ojo Zoom features and shows the app version.
-- One APK for ARM devices (arm64-v8a, armeabi-v7a), Android 5.0 or newer.
-
-Install `ojo-zoom-0.2.0.apk` below. It installs next to the original Ojo.
+Install `ojo-zoom-0.3.0.apk` below. It updates Ojo Zoom 0.2.0 and installs next to the original Ojo.
