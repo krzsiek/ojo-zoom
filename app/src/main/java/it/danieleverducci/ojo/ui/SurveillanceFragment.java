@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
 import android.net.Uri;
@@ -35,6 +36,7 @@ import androidx.fragment.app.Fragment;
 import org.videolan.libvlc.LibVLC;
 import org.videolan.libvlc.Media;
 import org.videolan.libvlc.MediaPlayer;
+import org.videolan.libvlc.interfaces.IMedia;
 import org.videolan.libvlc.interfaces.IVLCVout;
 
 import java.io.File;
@@ -70,7 +72,6 @@ public class SurveillanceFragment extends Fragment {
     final static private long MIN_FREE_TO_START_RECORDING = 1024L * 1024 * 1024;
     final static private long MIN_FREE_WHILE_RECORDING = 512L * 1024 * 1024;
     final static private long RECORDING_TICK_MS = 1000;
-    final static private int MAX_SNAPSHOT_SIDE = 4096;
 
     private FragmentSurveillanceBinding binding;
     private List<CameraView> cameraViews = new ArrayList<>();
@@ -434,6 +435,8 @@ public class SurveillanceFragment extends Fragment {
         final static private float MAX_ZOOM = 8f;
         final static private float DOUBLE_TAP_ZOOM = 2.5f;
         final static private int SWIPE_MIN_DISTANCE_DP = 80;
+        final static private int FRAMES_TO_SKIP_AFTER_RESIZE = 3;
+        final static private long MAX_HIDDEN_AFTER_RESIZE_MS = 700;
 
         protected FrameLayout container;   // Grid cell: handles focus, clicks and gestures, clips zoomed video
         protected TextureView videoView;   // Video output (TextureView supports scale/translation, SurfaceView doesn't)
@@ -449,6 +452,11 @@ public class SurveillanceFragment extends Fragment {
         private boolean multiTouch = false;        // More than one finger in the current gesture
         private boolean surfaceAttached = false;   // VLC output connected to the TextureView surface
         private boolean playRequested = false;
+        private int framesToSkip = 0;              // Frames still hidden after a resize
+        private final Runnable showVideoAfterResize = () -> {
+            framesToSkip = 0;
+            videoView.setAlpha(1f);
+        };
         private int videoWidth = 0;                // Displayed video size (sample aspect ratio applied)
         private int videoHeight = 0;
 
@@ -458,6 +466,7 @@ public class SurveillanceFragment extends Fragment {
 
             container = new FrameLayout(context);
             container.setClipChildren(true);
+            container.setBackgroundColor(Color.BLACK);
             container.setFocusable(true);
             // Foreground, not background: the video would cover a background drawable
             container.setOnFocusChangeListener((view, hasFocus) -> container.setForeground(
@@ -524,6 +533,9 @@ public class SurveillanceFragment extends Fragment {
 
                 @Override
                 public void onSurfaceTextureUpdated(SurfaceTexture surfaceTexture) {
+                    // After a resize show the video again once VLC draws at the new size
+                    if (framesToSkip > 0 && --framesToSkip == 0)
+                        showVideoAfterResize.run();
                 }
             });
 
@@ -535,6 +547,13 @@ public class SurveillanceFragment extends Fragment {
                         ivlcVout.setWindowSize(r - l, b - t);
                     resetZoom();
                     applyVideoAspect();
+                    // Hide the frames drawn while the decoder adapts to the new size (green flash)
+                    if (or - ol > 1 && r - l > 1) {
+                        videoView.setAlpha(0f);
+                        framesToSkip = FRAMES_TO_SKIP_AFTER_RESIZE;
+                        container.removeCallbacks(showVideoAfterResize);
+                        container.postDelayed(showVideoAfterResize, MAX_HIDDEN_AFTER_RESIZE_MS);
+                    }
                 }
             });
         }
@@ -698,28 +717,88 @@ public class SurveillanceFragment extends Fragment {
         }
 
         /**
-         * The whole current frame (not only the zoomed part), at the video resolution when known
+         * The whole current frame (not only the zoomed part), without black bars
          * @return null if no picture has been shown yet
          */
         public Bitmap captureFrame() {
             if (!videoView.isAvailable() || mediaPlayer == null || !mediaPlayer.isPlaying())
                 return null;
-            // Some Android versions apply the aspect transform to getBitmap(), adding the black bars:
-            // capture without it (the screen is not redrawn in between) to get the whole frame
+            Bitmap frame;
+            // Capture without our aspect transform (the screen is not redrawn in between)
             Matrix aspect = videoView.getTransform(null);
             try {
                 videoView.setTransform(null);
-                if (videoWidth > 0 && videoHeight > 0) {
-                    float scale = Math.min(1f, (float) MAX_SNAPSHOT_SIDE / Math.max(videoWidth, videoHeight));
-                    return videoView.getBitmap(Math.round(videoWidth * scale), Math.round(videoHeight * scale));
-                }
-                return videoView.getBitmap();
+                frame = videoView.getBitmap();
             } catch (RuntimeException | OutOfMemoryError e) {
                 Log.e(TAG, "Unable to capture frame", e);
                 return null;
             } finally {
                 videoView.setTransform(aspect);
             }
+            if (frame == null)
+                return null;
+            float videoAspect = getVideoAspect();
+            if (videoAspect <= 0)
+                return frame;
+            int w = frame.getWidth();
+            int h = frame.getHeight();
+            int fitW = w;
+            int fitH = Math.round(w / videoAspect);
+            if (fitH > h) {
+                fitH = h;
+                fitW = Math.round(h * videoAspect);
+            }
+            if (w - fitW < 2 && h - fitH < 2)
+                return frame;
+            int left = (w - fitW) / 2;
+            int top = (h - fitH) / 2;
+            Bitmap result;
+            if (isBlack(frame, 0, 0, w, top) && isBlack(frame, 0, top + fitH, w, h)
+                    && isBlack(frame, 0, 0, left, h) && isBlack(frame, left + fitW, 0, w, h)) {
+                // VLC drew the picture letterboxed in its surface: cut the bars
+                result = Bitmap.createBitmap(frame, left, top, fitW, fitH);
+            } else {
+                // The surface holds the whole picture, stretched: restore the aspect ratio
+                result = Bitmap.createScaledBitmap(frame, fitW, fitH, true);
+            }
+            if (result != frame)
+                frame.recycle();
+            return result;
+        }
+
+        /**
+         * Displayed width / height of the video, 0 if unknown
+         */
+        private float getVideoAspect() {
+            if (videoWidth > 0 && videoHeight > 0)
+                return (float) videoWidth / videoHeight;
+            IMedia.VideoTrack track = mediaPlayer.getCurrentVideoTrack();
+            if (track == null || track.width <= 0 || track.height <= 0)
+                return 0;
+            float sar = track.sarNum > 0 && track.sarDen > 0 ? (float) track.sarNum / track.sarDen : 1f;
+            float aspect = track.width * sar / track.height;
+            // Rotated video (orientation 5-8 are the 90/270 degree ones)
+            if (track.orientation >= 5 && track.orientation <= 8)
+                aspect = 1f / aspect;
+            return aspect;
+        }
+
+        /**
+         * True if the area is empty or (sampled) nearly black
+         */
+        private boolean isBlack(Bitmap bitmap, int left, int top, int right, int bottom) {
+            if (right - left <= 0 || bottom - top <= 0)
+                return true;
+            int stepX = Math.max(1, (right - left) / 32);
+            int stepY = Math.max(1, (bottom - top) / 32);
+            for (int y = top; y < bottom; y += stepY) {
+                for (int x = left; x < right; x += stepX) {
+                    int c = bitmap.getPixel(x, y);
+                    if (Color.red(c) > 24 || Color.green(c) > 24 || Color.blue(c) > 24)
+                        return false;
+                }
+            }
+            return true;
         }
 
         /**
