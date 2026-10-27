@@ -42,7 +42,8 @@ public class MediaSaver {
     private static final String TAG = "MediaSaver";
     private static final String FOLDER = "OjoZoom";
     private static final String RECORDINGS_TEMP_DIR = "recordings";
-    private static final long FILE_CLOSE_DELAY_MS = 1500;   // Let VLC close the file after the recording stops
+    private static final long FILE_CHECK_INTERVAL_MS = 1000;
+    private static final long FILE_CLOSE_TIMEOUT_MS = 20000;
 
     private static final ExecutorService executor = Executors.newSingleThreadExecutor();
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -132,17 +133,25 @@ public class MediaSaver {
     }
 
     /**
-     * Moves a finished recording to Movies/OjoZoom
+     * Moves a finished recording to Movies/OjoZoom, once VLC has finished writing it
      */
     public static void finishRecording(Context context, File dir, Callback callback) {
         Context appContext = context.getApplicationContext();
-        synchronized (activeRecordings) {
-            activeRecordings.remove(dir.getAbsolutePath());
-        }
         executor.execute(() -> {
-            try {
-                Thread.sleep(FILE_CLOSE_DELAY_MS);
-            } catch (InterruptedException ignored) {
+            // VLC closes the file asynchronously (later still if the view changes at the same time):
+            // wait until the size stops changing
+            long lastSize = -1;
+            long waited = 0;
+            while (waited < FILE_CLOSE_TIMEOUT_MS) {
+                sleep(FILE_CHECK_INTERVAL_MS);
+                waited += FILE_CHECK_INTERVAL_MS;
+                long size = getSize(dir);
+                if (size > 0 && size == lastSize)
+                    break;
+                lastSize = size;
+            }
+            synchronized (activeRecordings) {
+                activeRecordings.remove(dir.getAbsolutePath());
             }
             boolean success = publishRecordingDir(appContext, dir);
             mainHandler.post(() -> callback.onDone(success));
@@ -175,10 +184,8 @@ public class MediaSaver {
         if (files != null) {
             for (int i = 0; i < files.length; i++) {
                 File f = files[i];
-                if (f.length() == 0) {
-                    f.delete();
-                    continue;
-                }
+                if (f.length() == 0)
+                    continue;   // Never written: removed with the directory below
                 // The file name chosen by VLC can contain the stream url: use the camera name and time instead
                 String name = dir.getName() + (i > 0 ? "_" + i : "") + extensionOf(f);
                 try {
@@ -191,9 +198,25 @@ public class MediaSaver {
         }
         // Keep the directory if a file could not be moved (e.g. no space for the copy), retry next time
         File[] left = dir.listFiles();
-        if (left == null || left.length == 0)
+        boolean onlyEmptyFiles = true;
+        if (left != null)
+            for (File f : left)
+                if (f.length() > 0)
+                    onlyEmptyFiles = false;
+        if (onlyEmptyFiles) {
+            if (left != null)
+                for (File f : left)
+                    f.delete();
             dir.delete();
+        }
         return success;
+    }
+
+    private static void sleep(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ignored) {
+        }
     }
 
     private static boolean publishRecording(Context context, File file, String name) throws IOException {

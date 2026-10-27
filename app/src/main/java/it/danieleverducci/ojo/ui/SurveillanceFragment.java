@@ -704,8 +704,11 @@ public class SurveillanceFragment extends Fragment {
         public Bitmap captureFrame() {
             if (!videoView.isAvailable() || mediaPlayer == null || !mediaPlayer.isPlaying())
                 return null;
+            // Some Android versions apply the aspect transform to getBitmap(), adding the black bars:
+            // capture without it (the screen is not redrawn in between) to get the whole frame
+            Matrix aspect = videoView.getTransform(null);
             try {
-                // getBitmap() ignores the aspect transform: asking for the video size gives the full frame
+                videoView.setTransform(null);
                 if (videoWidth > 0 && videoHeight > 0) {
                     float scale = Math.min(1f, (float) MAX_SNAPSHOT_SIDE / Math.max(videoWidth, videoHeight));
                     return videoView.getBitmap(Math.round(videoWidth * scale), Math.round(videoHeight * scale));
@@ -714,6 +717,8 @@ public class SurveillanceFragment extends Fragment {
             } catch (RuntimeException | OutOfMemoryError e) {
                 Log.e(TAG, "Unable to capture frame", e);
                 return null;
+            } finally {
+                videoView.setTransform(aspect);
             }
         }
 

@@ -16,7 +16,7 @@ public class SharedPreferencesManager {
 
     public static boolean loadRotationEnabled(Context ctx) {
         SharedPreferences sharedPref = ctx.getSharedPreferences(SP_ROTATION_ENABLED, Context.MODE_PRIVATE);
-        return sharedPref.getBoolean(SP_ROTATION_ENABLED, false);
+        return sharedPref.getBoolean(SP_ROTATION_ENABLED, true);   // Ojo Zoom: follow the device rotation by default
     }
 
     public static void toggleRotationEnabled(Context ctx) {

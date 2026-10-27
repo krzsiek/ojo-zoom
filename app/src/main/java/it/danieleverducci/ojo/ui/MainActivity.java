@@ -83,7 +83,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         boolean rotationEnabledSetting = SharedPreferencesManager.loadRotationEnabled(this);
-        this.setRequestedOrientation(rotationEnabledSetting ? ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR : ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        this.setRequestedOrientation(rotationEnabledSetting ? ActivityInfo.SCREEN_ORIENTATION_FULL_USER : ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
 
         super.onStart();
     }

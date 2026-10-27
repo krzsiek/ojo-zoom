@@ -24,7 +24,7 @@ To make this possible the video is rendered on a `TextureView` instead of a `Sur
 - Only without zoom: while zoomed, dragging moves the picture as before.
 
 ### Portrait layout
-- With "Allow screen rotation" enabled, a portrait screen shows the cameras **one under the other**, full width, 16:9. Scroll down when they don't fit.
+- The screen follows the device rotation by default (the system auto-rotate lock is respected; "Landscape only" in the settings menu restores the old behaviour). A portrait screen shows the cameras **one under the other**, full width, 16:9. Scroll down when they don't fit.
 - Landscape keeps the automatic grid. Rotating doesn't restart the streams.
 - A camera opened fullscreen in portrait stays in portrait, fitted to the width; zoom works as usual.
 
