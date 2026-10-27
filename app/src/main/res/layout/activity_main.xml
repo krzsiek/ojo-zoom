@@ -13,18 +13,73 @@
         android:layout_height="match_parent"
         tools:layout="@layout/fragment_surveillance" />
 
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/fab"
+    <!-- White flash shown when a snapshot is taken -->
+    <View
+        android:id="@+id/snapshot_flash"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/white"
+        android:alpha="0"
+        android:visibility="gone" />
+
+    <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
         android:layout_margin="@dimen/fab_margin"
-        android:src="@drawable/ic_settings"
-        app:srcCompat="@drawable/ic_settings"
-        app:tint="@color/white"
-        android:tint="@color/white"
-        android:backgroundTint="@color/fab_background"
-        android:hint="@string/fab_add_camera"
-        android:contentDescription="@string/fab_add_camera"/>
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/recording_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="@dimen/fab_margin"
+            android:background="@drawable/recording_time_background"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:textColor="@color/white"
+            android:textSize="16sp"
+            android:visibility="gone"
+            tools:text="● 01:23 / 10:00"
+            tools:visibility="visible" />
+
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/fab_snapshot"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="@dimen/fab_margin"
+            app:srcCompat="@drawable/ic_photo_camera"
+            app:tint="@color/white"
+            android:backgroundTint="@color/fab_background"
+            android:contentDescription="@string/fab_snapshot"
+            android:visibility="gone" />
+
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/fab_record"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            app:srcCompat="@drawable/ic_videocam"
+            app:tint="@color/white"
+            android:backgroundTint="@color/fab_background"
+            android:contentDescription="@string/fab_record"
+            android:visibility="gone" />
+
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/fab"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/fab_margin"
+            android:src="@drawable/ic_settings"
+            app:srcCompat="@drawable/ic_settings"
+            app:tint="@color/white"
+            android:tint="@color/white"
+            android:backgroundTint="@color/fab_background"
+            android:hint="@string/fab_add_camera"
+            android:contentDescription="@string/fab_add_camera"/>
+
+    </LinearLayout>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

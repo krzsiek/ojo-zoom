@@ -2,10 +2,16 @@ package it.danieleverducci.ojo.ui;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
+import android.graphics.Bitmap;
+import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.GestureDetector;
 import android.view.LayoutInflater;
@@ -17,28 +23,32 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
-import android.widget.LinearLayout;
+import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.fragment.app.Fragment;
 
-import org.videolan.libvlc.interfaces.IVLCVout;
 import org.videolan.libvlc.LibVLC;
 import org.videolan.libvlc.Media;
 import org.videolan.libvlc.MediaPlayer;
+import org.videolan.libvlc.interfaces.IVLCVout;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 import it.danieleverducci.ojo.R;
 import it.danieleverducci.ojo.Settings;
+import it.danieleverducci.ojo.SharedPreferencesManager;
 import it.danieleverducci.ojo.databinding.FragmentSurveillanceBinding;
 import it.danieleverducci.ojo.entities.Camera;
 import it.danieleverducci.ojo.utils.DpiUtils;
+import it.danieleverducci.ojo.utils.MediaSaver;
 
 /**
  * Some streams to test:
@@ -55,36 +65,47 @@ public class SurveillanceFragment extends Fragment {
             //"--file-logging",
             //"--logfile=vlc-log.txt"
     };
+    // Recording safety: don't start below MIN_FREE_TO_START_RECORDING, and stop while
+    // there is still room to copy the file to the gallery plus MIN_FREE_WHILE_RECORDING
+    final static private long MIN_FREE_TO_START_RECORDING = 1024L * 1024 * 1024;
+    final static private long MIN_FREE_WHILE_RECORDING = 512L * 1024 * 1024;
+    final static private long RECORDING_TICK_MS = 1000;
+    final static private int MAX_SNAPSHOT_SIDE = 4096;
 
     private FragmentSurveillanceBinding binding;
     private List<CameraView> cameraViews = new ArrayList<>();
-    private boolean fullscreenCameraView = false;
-    private LinearLayout.LayoutParams cameraViewLayoutParams;
-    private LinearLayout.LayoutParams rowLayoutParams;
-    private LinearLayout.LayoutParams hiddenLayoutParams;
+    private CameraView fullscreenCamera;   // Camera opened fullscreen from the grid, null in grid view
+
+    // Recording in progress (one at a time)
+    private CameraView recordingCamera;
+    private File recordingDir;
+    private long recordingStartMs;
+    private long recordingMaxMs;
+    private final Handler recordingHandler = new Handler(Looper.getMainLooper());
+    private final Runnable recordingTick = new Runnable() {
+        @Override
+        public void run() {
+            if (recordingCamera == null)
+                return;
+            long elapsed = SystemClock.elapsedRealtime() - recordingStartMs;
+            if (elapsed >= recordingMaxMs) {
+                stopRecording(R.string.recording_stopped_time_limit);
+                return;
+            }
+            if (MediaSaver.getFreeBytes(requireContext()) < MIN_FREE_WHILE_RECORDING + MediaSaver.getSize(recordingDir)) {
+                stopRecording(R.string.recording_stopped_low_space);
+                return;
+            }
+            notifyRecordingState();
+            recordingHandler.postDelayed(this, RECORDING_TICK_MS);
+        }
+    };
 
     @Override
     public View onCreateView(
             LayoutInflater inflater, ViewGroup container,
             Bundle savedInstanceState
     ) {
-        int viewMargin = DpiUtils.DpToPixels(container.getContext(), 2);
-        cameraViewLayoutParams = new LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                1.0f
-        );
-        cameraViewLayoutParams.setMargins(viewMargin,viewMargin,viewMargin,viewMargin);
-
-        rowLayoutParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1.0f
-        );
-
-        // 1,1 instead of 0,0 because the latter doesn't work on android 13+
-        hiddenLayoutParams = new LinearLayout.LayoutParams(1, 1);
-
         binding = FragmentSurveillanceBinding.inflate(inflater, container, false);
         return binding.getRoot();
     }
@@ -95,7 +116,7 @@ public class SurveillanceFragment extends Fragment {
 
         leanbackMode(true);
 
-        fullscreenCameraView = false;
+        fullscreenCamera = null;
         addAllCameras();
 
         // Start playback for all streams
@@ -104,6 +125,9 @@ public class SurveillanceFragment extends Fragment {
         }
 
         expandToCameraViewIfRequired();
+
+        // Recordings interrupted by a crash are still in the app storage: move them to the gallery
+        MediaSaver.publishLeftoverRecordings(requireContext());
 
         // Register for back pressed events
         ((MainActivity)getActivity()).setOnBackButtonPressedListener(new OnBackButtonPressedListener() {
@@ -116,8 +140,7 @@ public class SurveillanceFragment extends Fragment {
                         return true;
                     }
                 }
-                if(fullscreenCameraView && cameraViews.size() > 1) {
-                    fullscreenCameraView = false;
+                if(isCameraFullscreen()) {
                     showAllCameras();
                     return true;
                 }
@@ -156,7 +179,16 @@ public class SurveillanceFragment extends Fragment {
 
         leanbackMode(false);
 
+        stopRecording(0);
         disposeAllCameras();
+    }
+
+    @Override
+    public void onConfigurationChanged(@NonNull Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // Rotation: grid in landscape, list in portrait. Views stay where they are, so streams keep playing.
+        if (binding != null)
+            binding.cameraGrid.requestLayout();
     }
 
 
@@ -164,38 +196,27 @@ public class SurveillanceFragment extends Fragment {
         Settings settings = Settings.fromDisk(getContext());
         List<Camera> cc = settings.getCameras();
 
-        int[] gridSize = calcGridDimensionsBasedOnNumberOfElements(cc.size());
-        int camIdx = 0;
-        for (int r = 0; r < gridSize[0]; r++) {
-            // Create row and add to row container
-            LinearLayout row = new LinearLayout(getContext());
-            binding.gridRowContainer.addView(row, rowLayoutParams);
-            // Add camera viewers to the row
-            for (int c = 0; c < gridSize[1]; c++) {
-                if ( camIdx < cc.size() ) {
-                    Camera cam = cc.get(camIdx);
-                    CameraView cv = addCameraView(cam, row);
-                    cv.startPlayback();
-                    cv.setOnClickListener(new View.OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-                            // Toggle single/multi camera views
-                            fullscreenCameraView = !fullscreenCameraView;
-                            if (fullscreenCameraView) {
-                                hideAllCameraViewsButNot(v);
-                            } else {
-                                showAllCameras();
-                            }
-                        }
-                    });
-                } else {
-                    // Cameras are less than the maximum number of cells in grid: fill remaining cells with empty views
-                    View ev = new View(getContext());
-                    ev.setBackgroundColor(getResources().getColor(R.color.purple_700));
-                    row.addView(ev, cameraViewLayoutParams);
+        int[] gridSize = CameraGridLayout.calcGridDimensionsBasedOnNumberOfElements(cc.size());
+        binding.cameraGrid.setCameraCount(cc.size());
+        for (Camera cam : cc) {
+            CameraView cv = addCameraView(cam);
+            cv.startPlayback();
+            cv.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    // Toggle single/multi camera views
+                    if (isCameraFullscreen())
+                        showAllCameras();
+                    else if (cameraViews.size() > 1)
+                        showFullscreen(cv);
                 }
-                camIdx++;
-            }
+            });
+        }
+        // Cameras are less than the maximum number of cells in grid: fill remaining cells with empty views
+        for (int i = cc.size(); i < gridSize[0] * gridSize[1]; i++) {
+            View ev = new View(getContext());
+            ev.setBackgroundColor(getResources().getColor(R.color.purple_700));
+            binding.cameraGrid.addView(ev);
         }
     }
 
@@ -205,69 +226,60 @@ public class SurveillanceFragment extends Fragment {
             cv.destroy();
         }
         cameraViews.clear();
+        fullscreenCamera = null;
         // Remove views
-        binding.gridRowContainer.removeAllViews();
+        binding.cameraGrid.setFullscreenChild(null);
+        binding.cameraGrid.removeAllViews();
     }
 
-    protected void hideAllCameraViewsButNot(View cameraView) {
-        for (int i = 0; i < binding.gridRowContainer.getChildCount(); i++) {
-            LinearLayout row = (LinearLayout) binding.gridRowContainer.getChildAt(i);
-            boolean emptyRow = true;
-            for (int j = 0; j < row.getChildCount(); j++) {
-                View cam = row.getChildAt(j);
-                if (cameraView == cam)
-                    emptyRow = false;
-                else
-                    cam.setLayoutParams(hiddenLayoutParams);
-            }
-            if (emptyRow)
-                row.setLayoutParams(hiddenLayoutParams);
-        }
+    protected void showFullscreen(CameraView cameraView) {
+        fullscreenCamera = cameraView;
+        binding.cameraGrid.setFullscreenChild(cameraView.container);
+        binding.gridScroll.scrollTo(0, 0);
+        cameraView.container.requestFocus();
+        ((MainActivity) requireActivity()).onCameraModeChanged();
     }
 
     protected void showAllCameras() {
+        stopRecording(0);
+        CameraView previous = fullscreenCamera;
+        fullscreenCamera = null;
         for (CameraView cv : cameraViews)
             cv.resetZoom();
-        for (int i = 0; i < binding.gridRowContainer.getChildCount(); i++) {
-            LinearLayout row = (LinearLayout) binding.gridRowContainer.getChildAt(i);
-            row.setLayoutParams(rowLayoutParams);
-            for (int j = 0; j < row.getChildCount(); j++) {
-                View cam = row.getChildAt(j);
-                cam.setLayoutParams(cameraViewLayoutParams);
-            }
-        }
+        binding.cameraGrid.setFullscreenChild(null);
+        // Portrait list: scroll back to the camera that was fullscreen
+        if (previous != null)
+            binding.gridScroll.post(() -> {
+                if (binding != null && fullscreenCamera == null)
+                    binding.gridScroll.scrollTo(0, previous.container.getTop());
+            });
+        ((MainActivity) requireActivity()).onCameraModeChanged();
     }
 
-    private CameraView addCameraView(Camera camera, LinearLayout rowContainer) {
+    /**
+     * Fullscreen: shows the next (+1) or previous (-1) camera
+     */
+    private void switchFullscreenCamera(int direction) {
+        if (fullscreenCamera == null || cameraViews.size() < 2)
+            return;
+        stopRecording(0);
+        int n = cameraViews.size();
+        int next = (cameraViews.indexOf(fullscreenCamera) + direction + n) % n;
+        fullscreenCamera.resetZoom();
+        showFullscreen(cameraViews.get(next));
+    }
+
+    private CameraView addCameraView(Camera camera) {
         CameraView cv = new CameraView(
                 getContext(),
                 camera
         );
 
         // Add to layout
-        rowContainer.addView(cv.container, cameraViewLayoutParams);
+        binding.cameraGrid.addView(cv.container);
 
         cameraViews.add(cv);
         return cv;
-    }
-
-    /**
-     * Returns the dimensions of the grid based on the number of elements.
-     * Es: to display 3 elements is needed a 4-element grid, with 2 elements per side (a 2x2 grid)
-     * Es: to display 6 elements is needed a 9-element grid, with 3 elements per side (a 2x3 grid)
-     * Es: to display 7 elements is needed a 9-element grid, with 3 elements per side (a 3x3 grid)
-     * @param elements
-     */
-    private int[] calcGridDimensionsBasedOnNumberOfElements(int elements) {
-        int rows = 1;
-        int cols = 1;
-        while (rows * cols < elements) {
-            cols += 1;
-            if (rows * cols >= elements) break;
-            rows += 1;
-        }
-        int[] dimensions = {rows, cols};
-        return dimensions;
     }
 
     private void expandToCameraViewIfRequired() {
@@ -293,18 +305,18 @@ public class SurveillanceFragment extends Fragment {
     }
 
     private void expandByIndex(int index) {
-        if (index < 0 || cameraViews.size() <= index) {
+        if (index < 0 || cameraViews.size() <= index || cameraViews.size() < 2) {
             return;
         }
-        fullscreenCameraView = true;
-        hideAllCameraViewsButNot(cameraViews.get(index).container);
+        showFullscreen(cameraViews.get(index));
     }
 
     private void expandByName(String name) {
+        if (cameraViews.size() < 2)
+            return;
         for(CameraView cameraView: cameraViews) {
             if (cameraView.camera.getName().equals(name)) {
-                fullscreenCameraView = true;
-                hideAllCameraViewsButNot(cameraView.container);
+                showFullscreen(cameraView);
                 break;
             }
         }
@@ -314,14 +326,105 @@ public class SurveillanceFragment extends Fragment {
      * True when one camera, picked from the grid, fills the screen
      */
     public boolean isCameraFullscreen() {
-        return fullscreenCameraView && cameraViews.size() > 1;
+        return fullscreenCamera != null && cameraViews.size() > 1;
+    }
+
+    /**
+     * The camera filling the screen (fullscreen or the only one), null in grid view
+     */
+    private CameraView getActiveCamera() {
+        if (fullscreenCamera != null)
+            return fullscreenCamera;
+        return cameraViews.size() == 1 ? cameraViews.get(0) : null;
+    }
+
+    /**
+     * Snapshots and recordings are possible when a single camera fills the screen
+     */
+    public boolean canCapture() {
+        return getActiveCamera() != null;
     }
 
     /**
      * Zoom is allowed only when a single camera fills the screen
      */
     private boolean isZoomAllowed() {
-        return fullscreenCameraView || cameraViews.size() == 1;
+        return canCapture();
+    }
+
+    /**
+     * Saves the current frame of the camera filling the screen to Pictures/OjoZoom
+     * @return false if there is no picture to save yet
+     */
+    public boolean takeSnapshot() {
+        CameraView cv = getActiveCamera();
+        Bitmap frame = cv == null ? null : cv.captureFrame();
+        if (frame == null) {
+            Toast.makeText(getContext(), R.string.snapshot_failed, Toast.LENGTH_SHORT).show();
+            return false;
+        }
+        Context appContext = requireContext().getApplicationContext();
+        MediaSaver.saveSnapshot(appContext, frame, cv.camera.getName(), success ->
+                Toast.makeText(appContext, success ? R.string.snapshot_saved : R.string.snapshot_failed, Toast.LENGTH_SHORT).show());
+        return true;
+    }
+
+    public boolean isRecording() {
+        return recordingCamera != null;
+    }
+
+    public void toggleRecording() {
+        if (isRecording())
+            stopRecording(R.string.recording_saving);
+        else
+            startRecording();
+    }
+
+    private void startRecording() {
+        CameraView cv = getActiveCamera();
+        if (cv == null || isRecording())
+            return;
+        if (MediaSaver.getFreeBytes(requireContext()) < MIN_FREE_TO_START_RECORDING) {
+            Toast.makeText(getContext(), R.string.recording_low_space, Toast.LENGTH_LONG).show();
+            return;
+        }
+        File dir = MediaSaver.newRecordingDir(requireContext(), cv.camera.getName());
+        if (!cv.startRecording(dir)) {
+            MediaSaver.finishRecording(requireContext(), dir, success -> {});
+            Toast.makeText(getContext(), R.string.recording_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        recordingCamera = cv;
+        recordingDir = dir;
+        recordingStartMs = SystemClock.elapsedRealtime();
+        recordingMaxMs = SharedPreferencesManager.loadMaxRecordingMinutes(requireContext()) * 60_000L;
+        recordingHandler.postDelayed(recordingTick, RECORDING_TICK_MS);
+        notifyRecordingState();
+    }
+
+    /**
+     * @param messageRes message to show, 0 for none
+     */
+    private void stopRecording(int messageRes) {
+        if (recordingCamera == null)
+            return;
+        recordingHandler.removeCallbacks(recordingTick);
+        recordingCamera.stopRecording();
+        Context appContext = requireContext().getApplicationContext();
+        MediaSaver.finishRecording(appContext, recordingDir, success ->
+                Toast.makeText(appContext, success ? R.string.recording_saved : R.string.recording_failed, Toast.LENGTH_SHORT).show());
+        if (messageRes != 0)
+            Toast.makeText(appContext, messageRes, Toast.LENGTH_SHORT).show();
+        recordingCamera = null;
+        recordingDir = null;
+        notifyRecordingState();
+    }
+
+    private void notifyRecordingState() {
+        if (getActivity() instanceof MainActivity) {
+            long elapsed = isRecording() ? SystemClock.elapsedRealtime() - recordingStartMs : 0;
+            ((MainActivity) getActivity()).onRecordingStateChanged(isRecording(), elapsed, recordingMaxMs);
+        }
     }
 
     /**
@@ -330,6 +433,7 @@ public class SurveillanceFragment extends Fragment {
     private class CameraView {
         final static private float MAX_ZOOM = 8f;
         final static private float DOUBLE_TAP_ZOOM = 2.5f;
+        final static private int SWIPE_MIN_DISTANCE_DP = 80;
 
         protected FrameLayout container;   // Grid cell: handles focus, clicks and gestures, clips zoomed video
         protected TextureView videoView;   // Video output (TextureView supports scale/translation, SurfaceView doesn't)
@@ -342,8 +446,11 @@ public class SurveillanceFragment extends Fragment {
         private float panX = 0f;
         private float panY = 0f;
         private boolean tapAlreadyHandled = false;
+        private boolean multiTouch = false;        // More than one finger in the current gesture
         private boolean surfaceAttached = false;   // VLC output connected to the TextureView surface
         private boolean playRequested = false;
+        private int videoWidth = 0;                // Displayed video size (sample aspect ratio applied)
+        private int videoHeight = 0;
 
         public CameraView(Context context, Camera camera) {
             this.camera = camera;
@@ -375,16 +482,24 @@ public class SurveillanceFragment extends Fragment {
             // Load media
             Media m = new Media(libvlc, Uri.parse(camera.getRtspUrl()));
             mediaPlayer.setMedia(m);
+            m.release();
 
             // Video output: connect VLC only once the TextureView surface really exists
-            // (libVLC 2.x crashes if given a TextureView whose surface isn't created yet)
             videoView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
                 @Override
                 public void onSurfaceTextureAvailable(SurfaceTexture surfaceTexture, int width, int height) {
                     if (mediaPlayer == null || surfaceAttached)
                         return;
                     ivlcVout.setVideoSurface(surfaceTexture);
-                    ivlcVout.attachViews();
+                    // VLC tells the video size, the aspect ratio is kept with the TextureView transform
+                    ivlcVout.attachViews((vout, w, h, visibleWidth, visibleHeight, sarNum, sarDen) -> {
+                        if (visibleWidth <= 0 || visibleHeight <= 0)
+                            return;
+                        double sar = sarNum > 0 && sarDen > 0 ? (double) sarNum / sarDen : 1.0;
+                        videoWidth = (int) Math.round(visibleWidth * sar);
+                        videoHeight = visibleHeight;
+                        container.post(() -> applyVideoAspect());
+                    });
                     ivlcVout.setWindowSize(width, height);
                     surfaceAttached = true;
                     if (playRequested)
@@ -419,11 +534,34 @@ public class SurveillanceFragment extends Fragment {
                     if (mediaPlayer != null && r - l > 0 && b - t > 0)
                         ivlcVout.setWindowSize(r - l, b - t);
                     resetZoom();
+                    applyVideoAspect();
                 }
             });
         }
 
+        /**
+         * Fits the video in the view keeping its aspect ratio (black bars on the sides or top and bottom)
+         */
+        private void applyVideoAspect() {
+            float viewW = container.getWidth();
+            float viewH = container.getHeight();
+            Matrix matrix = new Matrix();
+            if (videoWidth > 0 && videoHeight > 0 && viewW > 1 && viewH > 1) {
+                float videoAspect = (float) videoWidth / videoHeight;
+                float fitW = viewW;
+                float fitH = viewW / videoAspect;
+                if (fitH > viewH) {
+                    fitH = viewH;
+                    fitW = viewH * videoAspect;
+                }
+                matrix.setScale(fitW / viewW, fitH / viewH);
+                matrix.postTranslate((viewW - fitW) / 2f, (viewH - fitH) / 2f);
+            }
+            videoView.setTransform(matrix);
+        }
+
         private void setupGestures(Context context) {
+            final int swipeMinDistance = DpiUtils.DpToPixels(context, SWIPE_MIN_DISTANCE_DP);
             final ScaleGestureDetector scaleDetector = new ScaleGestureDetector(context,
                     new ScaleGestureDetector.SimpleOnScaleGestureListener() {
                         @Override
@@ -481,11 +619,34 @@ public class SurveillanceFragment extends Fragment {
                             applyTransform();
                             return true;
                         }
+
+                        @Override
+                        public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+                            // Fullscreen without zoom: swipe left for the next camera, right for the previous one
+                            if (e1 == null || multiTouch || isZoomed() || fullscreenCamera != CameraView.this)
+                                return false;
+                            float dx = e2.getX() - e1.getX();
+                            float dy = e2.getY() - e1.getY();
+                            if (Math.abs(dx) < swipeMinDistance || Math.abs(dx) < 1.5f * Math.abs(dy))
+                                return false;
+                            switchFullscreenCamera(dx < 0 ? 1 : -1);
+                            return true;
+                        }
                     });
 
             container.setOnTouchListener((v, event) -> {
-                if (event.getActionMasked() == MotionEvent.ACTION_DOWN)
-                    tapAlreadyHandled = false;
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        tapAlreadyHandled = false;
+                        multiTouch = false;
+                        // A camera filling the screen gets all the gestures, the list must not scroll
+                        if (isZoomAllowed())
+                            container.getParent().requestDisallowInterceptTouchEvent(true);
+                        break;
+                    case MotionEvent.ACTION_POINTER_DOWN:
+                        multiTouch = true;
+                        break;
+                }
                 scaleDetector.onTouchEvent(event);
                 gestureDetector.onTouchEvent(event);
                 return true;
@@ -537,6 +698,40 @@ public class SurveillanceFragment extends Fragment {
         }
 
         /**
+         * The whole current frame (not only the zoomed part), at the video resolution when known
+         * @return null if no picture has been shown yet
+         */
+        public Bitmap captureFrame() {
+            if (!videoView.isAvailable() || mediaPlayer == null || !mediaPlayer.isPlaying())
+                return null;
+            try {
+                // getBitmap() ignores the aspect transform: asking for the video size gives the full frame
+                if (videoWidth > 0 && videoHeight > 0) {
+                    float scale = Math.min(1f, (float) MAX_SNAPSHOT_SIDE / Math.max(videoWidth, videoHeight));
+                    return videoView.getBitmap(Math.round(videoWidth * scale), Math.round(videoHeight * scale));
+                }
+                return videoView.getBitmap();
+            } catch (RuntimeException | OutOfMemoryError e) {
+                Log.e(TAG, "Unable to capture frame", e);
+                return null;
+            }
+        }
+
+        /**
+         * Starts saving the stream, as received from the camera, to a file in dir
+         */
+        public boolean startRecording(File dir) {
+            if (mediaPlayer == null || !mediaPlayer.isPlaying())
+                return false;
+            return mediaPlayer.record(dir.getAbsolutePath());
+        }
+
+        public void stopRecording() {
+            if (mediaPlayer != null)
+                mediaPlayer.record(null);
+        }
+
+        /**
          * Starts the playback.
          */
         public void startPlayback() {
@@ -560,10 +755,10 @@ public class SurveillanceFragment extends Fragment {
                 ivlcVout.detachViews();
                 surfaceAttached = false;
             }
-            libvlc.release();
-            libvlc = null;
             mediaPlayer.release();
             mediaPlayer = null;
+            libvlc.release();
+            libvlc = null;
             ivlcVout = null;
         }
     }

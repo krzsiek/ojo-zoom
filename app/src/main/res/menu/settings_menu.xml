@@ -11,6 +11,10 @@
         android:title="@string/menuitem_allow_rotation"
         app:showAsAction="never"/>
 
+    <item android:id="@+id/menuitem_max_recording"
+        android:title="@string/menuitem_max_recording"
+        app:showAsAction="never"/>
+
     <item android:id="@+id/menuitem_info"
         android:title="@string/menuitem_info"
         app:showAsAction="never"/>

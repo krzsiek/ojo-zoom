@@ -8,4 +8,5 @@
 
     <color name="fab_foreground">@color/purple_500</color>
     <color name="fab_background">@color/purple_200</color>
+    <color name="recording_red">#FFD32F2F</color>
 </resources>

@@ -24,7 +24,6 @@
 
     <string name="app_info_title">Informazioni su Ojo Zoom</string>
     <string name="app_info_version">Versione %1$s</string>
-    <string name="app_info_fork_desc">Ojo Zoom è un fork di Ojo con funzioni aggiuntive:\n• zoom con due dita e doppio tocco sulla telecamera a schermo intero, trascina per spostarti, indietro annulla lo zoom\n• il pulsante delle impostazioni è nascosto mentre si guardano le telecamere: una pressione lunga (1,5 s) sulla griglia, o un tasto qualsiasi del telecomando su Android TV, lo mostra per 5 secondi</string>
     <string name="app_info_fork_repo_desc">Codice sorgente e release di Ojo Zoom: https://github.com/krzsiek/ojo-zoom</string>
     <string name="app_info_creator_desc">Creato da Daniele Verducci.</string>
     <string name="app_info_license_desc">Questa app è rilasciata sotto licenza GNU GENERAL PUBLIC LICENSE v3+. Puoi ottenerne una copia qui: https://raw.githubusercontent.com/penguin86/ojo/master/LICENSE</string>
@@ -33,4 +32,20 @@
     <string name="app_info_translators_title">Traduttori:</string>
     <string name="app_info_translators_names">Yurt Page (Russian)</string>
 
+    <string name="fab_snapshot">Istantanea</string>
+    <string name="fab_record">Registra</string>
+    <string name="snapshot_saved">Istantanea salvata in Pictures/OjoZoom</string>
+    <string name="snapshot_failed">Ancora nessuna immagine da salvare</string>
+    <string name="recording_saved">Registrazione salvata in Movies/OjoZoom</string>
+    <string name="recording_saving">Registrazione fermata, salvataggio…</string>
+    <string name="recording_failed">Impossibile salvare la registrazione</string>
+    <string name="recording_low_space">Spazio libero insufficiente per registrare (serve almeno 1 GB)</string>
+    <string name="recording_stopped_time_limit">Registrazione fermata: raggiunto il limite di tempo</string>
+    <string name="recording_stopped_low_space">Registrazione fermata: memoria quasi piena</string>
+    <string name="storage_permission_granted">Permesso concesso, premi di nuovo il pulsante</string>
+    <string name="storage_permission_denied">Serve il permesso di archiviazione per salvare istantanee e registrazioni</string>
+    <string name="menuitem_max_recording">Durata massima registrazione: %1$d min</string>
+    <string name="max_recording_title">Durata massima registrazione</string>
+    <string name="max_recording_minutes">%1$d min</string>
+    <string name="app_info_fork_desc">Ojo Zoom è un fork di Ojo con funzioni aggiuntive:\n• zoom con due dita e doppio tocco sulla telecamera a schermo intero, trascina per spostarti, indietro annulla lo zoom\n• scorri a sinistra o a destra sulla telecamera a schermo intero (senza zoom) per passare alla successiva o alla precedente\n• in verticale le telecamere sono una sotto l\'altra, scorri per vederle tutte (serve \"Allow screen rotation\")\n• istantanee (Pictures/OjoZoom) e registrazioni (Movies/OjoZoom): pressione lunga sulla telecamera a schermo intero, o pressione lunga di OK sul telecomando, per mostrare i pulsanti. Le registrazioni si fermano da sole dopo la durata massima impostata o quando la memoria si riempie\n• il pulsante delle impostazioni è nascosto mentre si guardano le telecamere: una pressione lunga (1,5 s) sulla griglia, o un tasto qualsiasi del telecomando su Android TV, lo mostra per 5 secondi</string>
 </resources>

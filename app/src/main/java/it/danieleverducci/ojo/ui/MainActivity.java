@@ -1,7 +1,10 @@
 package it.danieleverducci.ojo.ui;
 
+import android.Manifest;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -9,39 +12,51 @@ import android.os.Looper;
 import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.WindowManager;
+import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
+
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
+
+import java.util.Locale;
 
 import it.danieleverducci.ojo.R;
 
 import it.danieleverducci.ojo.Settings;
 import it.danieleverducci.ojo.SharedPreferencesManager;
 import it.danieleverducci.ojo.databinding.ActivityMainBinding;
+import it.danieleverducci.ojo.utils.MediaSaver;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
+    private static final int REQUEST_STORAGE_PERMISSION = 1;
 
     private ActivityMainBinding binding;
     private OnBackButtonPressedListener onBackButtonPressedListener;
 
-    // Settings button is hidden while cameras are shown.
-    // In grid view (or with a single camera) a long press anywhere shows it for a while.
+    // Buttons are hidden while cameras are shown. A long press anywhere (or a long press of OK
+    // on a remote) shows them for a while: settings in the grid, snapshot and record on a camera
+    // filling the screen. While recording the record button stays on screen.
     private boolean hasCameras = false;
+    private boolean recording = false;
+    private boolean okLongPressHandled = false;
     private static final long FAB_LONG_PRESS_MS = 1500;
     private static final long FAB_VISIBLE_MS = 5000;
+    private static final long FLASH_MS = 150;
     private final Handler fabHandler = new Handler(Looper.getMainLooper());
-    private final Runnable hideFabRunnable = () -> {
-        if (binding != null && hasCameras)
-            binding.fab.hide();
-    };
+    private final Runnable hideControlsRunnable = this::hideControlsNow;
     private final Runnable longPressRunnable = () -> {
-        if (binding == null || isCameraFullscreen())
+        if (binding == null)
             return;
         binding.fab.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-        showFabTemporarily();
+        showControlsTemporarily();
     };
     private float touchDownX, touchDownY;
 
@@ -61,6 +76,8 @@ public class MainActivity extends AppCompatActivity {
         setContentView(binding.getRoot());
 
         binding.fab.setOnClickListener(view -> openSettings());
+        binding.fabSnapshot.setOnClickListener(view -> withStoragePermission(this::takeSnapshot));
+        binding.fabRecord.setOnClickListener(view -> withStoragePermission(this::toggleRecording));
     }
 
     @Override
@@ -75,18 +92,20 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         hasCameras = !Settings.fromDisk(this).getCameras().isEmpty();
-        fabHandler.removeCallbacks(hideFabRunnable);
+        fabHandler.removeCallbacks(hideControlsRunnable);
         fabHandler.removeCallbacks(longPressRunnable);
+        hideFab(binding.fabSnapshot);
+        hideFab(binding.fabRecord);
         if (hasCameras)
-            binding.fab.hide();
+            hideFab(binding.fab);
         else
-            binding.fab.show();   // Nothing to watch yet: settings button is the only thing on screen
+            showFab(binding.fab);   // Nothing to watch yet: settings button is the only thing on screen
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        fabHandler.removeCallbacks(hideFabRunnable);
+        fabHandler.removeCallbacks(hideControlsRunnable);
         fabHandler.removeCallbacks(longPressRunnable);
     }
 
@@ -112,36 +131,206 @@ public class MainActivity extends AppCompatActivity {
                     break;
             }
         }
-        boolean handled = super.dispatchTouchEvent(ev);
-        // A tap may have just opened a camera fullscreen: no button there
-        if (hasCameras && isCameraFullscreen())
-            hideFabNow();
-        return handled;
+        return super.dispatchTouchEvent(ev);
     }
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        // Remote control (Android TV): any key shows the button in grid view
-        if (hasCameras && event.getAction() == KeyEvent.ACTION_DOWN && !isCameraFullscreen()
-                && binding.fab.getVisibility() != android.view.View.VISIBLE)
-            showFabTemporarily();
+        if (hasCameras) {
+            // Remote control (Android TV): long press OK on a camera filling the screen shows snapshot and record
+            if (isConfirmKey(event.getKeyCode()) && canCapture() && !isControlFocused()) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() > 0) {
+                    if (!okLongPressHandled) {
+                        okLongPressHandled = true;
+                        binding.fab.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                        showControlsTemporarily();
+                        binding.fabSnapshot.requestFocus();
+                    }
+                    return true;
+                }
+            }
+            if (okLongPressHandled && isConfirmKey(event.getKeyCode())) {
+                // Swallow the rest of the long press, it must not click the button that just got the focus
+                if (event.getAction() == KeyEvent.ACTION_UP)
+                    okLongPressHandled = false;
+                return true;
+            }
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (areControlsVisible())
+                    keepControlsVisible();   // Moving between the buttons with the remote
+                else if (!isCameraFullscreen())
+                    showControlsTemporarily();   // Any key shows the settings button in grid view
+            }
+        }
         return super.dispatchKeyEvent(event);
     }
 
-    private boolean isCameraFullscreen() {
+    private static boolean isConfirmKey(int keyCode) {
+        return keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER
+                || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER;
+    }
+
+    private boolean isControlFocused() {
+        return binding.fab.hasFocus() || binding.fabSnapshot.hasFocus() || binding.fabRecord.hasFocus();
+    }
+
+    private SurveillanceFragment getSurveillanceFragment() {
         Fragment f = getSupportFragmentManager().findFragmentById(R.id.fragment_surveillance);
-        return f instanceof SurveillanceFragment && ((SurveillanceFragment) f).isCameraFullscreen();
+        return f instanceof SurveillanceFragment ? (SurveillanceFragment) f : null;
     }
 
-    private void showFabTemporarily() {
-        fabHandler.removeCallbacks(hideFabRunnable);
-        binding.fab.show();
-        fabHandler.postDelayed(hideFabRunnable, FAB_VISIBLE_MS);
+    private boolean isCameraFullscreen() {
+        SurveillanceFragment f = getSurveillanceFragment();
+        return f != null && f.isCameraFullscreen();
     }
 
-    private void hideFabNow() {
-        fabHandler.removeCallbacks(hideFabRunnable);
-        binding.fab.hide();
+    private boolean canCapture() {
+        SurveillanceFragment f = getSurveillanceFragment();
+        return f != null && f.canCapture();
+    }
+
+    private boolean areControlsVisible() {
+        return binding.fab.getVisibility() == View.VISIBLE || binding.fabSnapshot.getVisibility() == View.VISIBLE;
+    }
+
+    private void showControlsTemporarily() {
+        if (isCameraFullscreen())
+            hideFab(binding.fab);   // Fullscreen camera: back returns to the grid, where settings are
+        else
+            showFab(binding.fab);
+        if (canCapture()) {
+            showFab(binding.fabSnapshot);
+            showFab(binding.fabRecord);
+        }
+        keepControlsVisible();
+    }
+
+    private void keepControlsVisible() {
+        fabHandler.removeCallbacks(hideControlsRunnable);
+        fabHandler.postDelayed(hideControlsRunnable, FAB_VISIBLE_MS);
+    }
+
+    private void hideControlsNow() {
+        fabHandler.removeCallbacks(hideControlsRunnable);
+        if (binding == null || !hasCameras)
+            return;
+        hideFab(binding.fab);
+        hideFab(binding.fabSnapshot);
+        if (!recording)
+            hideFab(binding.fabRecord);
+    }
+
+    private static void showFab(FloatingActionButton fab) {
+        fab.show();
+    }
+
+    private static void hideFab(FloatingActionButton fab) {
+        // GONE instead of INVISIBLE: the other buttons move to the screen edge
+        fab.hide(new FloatingActionButton.OnVisibilityChangedListener() {
+            @Override
+            public void onHidden(FloatingActionButton fab) {
+                fab.setVisibility(View.GONE);
+            }
+        });
+    }
+
+    /**
+     * Called by SurveillanceFragment when a camera goes fullscreen or back to the grid
+     */
+    public void onCameraModeChanged() {
+        if (!hasCameras)
+            return;
+        if (isCameraFullscreen())
+            hideFab(binding.fab);
+        if (!canCapture()) {
+            hideFab(binding.fabSnapshot);
+            if (!recording)
+                hideFab(binding.fabRecord);
+        }
+    }
+
+    /**
+     * Called by SurveillanceFragment when a recording starts or stops, and every second while recording
+     */
+    public void onRecordingStateChanged(boolean recording, long elapsedMs, long maxMs) {
+        boolean wasRecording = this.recording;
+        this.recording = recording;
+        int color = ContextCompat.getColor(this, recording ? R.color.recording_red : R.color.fab_background);
+        binding.fabRecord.setBackgroundTintList(ColorStateList.valueOf(color));
+        if (recording) {
+            showFab(binding.fabRecord);
+            binding.recordingTime.setVisibility(View.VISIBLE);
+            binding.recordingTime.setText("● " + formatTime(elapsedMs) + " / " + formatTime(maxMs));
+        } else {
+            binding.recordingTime.setVisibility(View.GONE);
+            if (wasRecording) {
+                if (canCapture())
+                    keepControlsVisible();   // Hide with the other buttons
+                else
+                    hideFab(binding.fabRecord);
+            }
+        }
+    }
+
+    private static String formatTime(long ms) {
+        long s = ms / 1000;
+        return String.format(Locale.US, "%02d:%02d", s / 60, s % 60);
+    }
+
+    private void takeSnapshot() {
+        SurveillanceFragment f = getSurveillanceFragment();
+        if (f == null)
+            return;
+        keepControlsVisible();
+        if (f.takeSnapshot()) {
+            binding.fabSnapshot.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            flash();
+        }
+    }
+
+    private void toggleRecording() {
+        SurveillanceFragment f = getSurveillanceFragment();
+        if (f == null)
+            return;
+        binding.fabRecord.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        f.toggleRecording();
+        keepControlsVisible();
+    }
+
+    /**
+     * Camera-like white flash: the snapshot has been taken
+     */
+    private void flash() {
+        View v = binding.snapshotFlash;
+        v.animate().cancel();
+        v.setAlpha(0.8f);
+        v.setVisibility(View.VISIBLE);
+        v.animate().alpha(0f).setStartDelay(FLASH_MS).setDuration(FLASH_MS * 2)
+                .withEndAction(() -> v.setVisibility(View.GONE)).start();
+    }
+
+    /**
+     * Android 6 - 9: asks for the storage permission before saving snapshots or recordings
+     * (the action does not run then)
+     */
+    private void withStoragePermission(Runnable action) {
+        if (!MediaSaver.needsStoragePermission(this)) {
+            action.run();
+            return;
+        }
+        ActivityCompat.requestPermissions(this,
+                new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_STORAGE_PERMISSION);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQUEST_STORAGE_PERMISSION)
+            return;
+        // The cameras restart after the permission dialog: the user presses the button again
+        boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+        Toast.makeText(this, granted ? R.string.storage_permission_granted : R.string.storage_permission_denied,
+                Toast.LENGTH_LONG).show();
     }
 
     public void setOnBackButtonPressedListener(OnBackButtonPressedListener onBackButtonPressedListener) {

@@ -6,6 +6,7 @@ import android.os.Bundle;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.widget.Toolbar;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.ItemTouchHelper;
@@ -52,6 +53,8 @@ public class SettingsFragment extends Fragment {
         binding.settingsToolbar.inflateMenu(R.menu.settings_menu);
         MenuItem rotMenuItem = binding.settingsToolbar.getMenu().findItem(R.id.menuitem_allow_rotation);
         rotMenuItem.setTitle(((SettingsActivity)getActivity()).getRotationEnabledSetting() ? R.string.menuitem_deny_rotation : R.string.menuitem_allow_rotation);
+        MenuItem maxRecMenuItem = binding.settingsToolbar.getMenu().findItem(R.id.menuitem_max_recording);
+        updateMaxRecordingTitle(maxRecMenuItem);
 
         // Register for item click
         binding.settingsToolbar.setOnMenuItemClickListener(new Toolbar.OnMenuItemClickListener() {
@@ -66,6 +69,9 @@ public class SettingsFragment extends Fragment {
                         SharedPreferencesManager.saveRotationEnabled(getContext(), ((SettingsActivity)getActivity()).getRotationEnabledSetting());
                         item.setTitle(((SettingsActivity)getActivity()).getRotationEnabledSetting() ? R.string.menuitem_deny_rotation : R.string.menuitem_allow_rotation);
                         return true;
+                    case R.id.menuitem_max_recording:
+                        showMaxRecordingDialog(item);
+                        return true;
                     case R.id.menuitem_info:
                         ((SettingsActivity)getActivity()).navigateToFragment(R.id.action_SettingsToInfoFragment);
                         return true;
@@ -73,6 +79,34 @@ public class SettingsFragment extends Fragment {
                 return false;
             }
         });
+    }
+
+    private void updateMaxRecordingTitle(MenuItem item) {
+        item.setTitle(getString(R.string.menuitem_max_recording, SharedPreferencesManager.loadMaxRecordingMinutes(getContext())));
+    }
+
+    /**
+     * Recordings stop by themselves after this time, so a forgotten recording can't fill the storage
+     */
+    private void showMaxRecordingDialog(MenuItem item) {
+        int[] choices = SharedPreferencesManager.MAX_RECORDING_MINUTES_CHOICES;
+        int current = SharedPreferencesManager.loadMaxRecordingMinutes(getContext());
+        String[] labels = new String[choices.length];
+        int checked = -1;
+        for (int i = 0; i < choices.length; i++) {
+            labels[i] = getString(R.string.max_recording_minutes, choices[i]);
+            if (choices[i] == current)
+                checked = i;
+        }
+        new AlertDialog.Builder(requireContext())
+                .setTitle(R.string.max_recording_title)
+                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
+                    SharedPreferencesManager.saveMaxRecordingMinutes(getContext(), choices[which]);
+                    updateMaxRecordingTitle(item);
+                    dialog.dismiss();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     @Override

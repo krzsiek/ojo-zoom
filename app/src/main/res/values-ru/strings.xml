@@ -24,11 +24,26 @@
 
     <string name="app_info_title">О программе Ojo Zoom</string>
     <string name="app_info_version">Версия %1$s</string>
-    <string name="app_info_fork_desc">Ojo Zoom — это форк Ojo с дополнительными функциями:\n• масштабирование двумя пальцами и двойным касанием на полноэкранной камере, перемещение пальцем, «Назад» сбрасывает масштаб\n• кнопка настроек скрыта при просмотре камер: долгое нажатие (1,5 с) на сетке или любая кнопка пульта на Android TV показывает её на 5 секунд</string>
     <string name="app_info_fork_repo_desc">Исходный код и релизы Ojo Zoom: https://github.com/krzsiek/ojo-zoom</string>
     <string name="app_info_creator_desc">Автор: Daniele Verducci.</string>
     <string name="app_info_license_desc">Это приложение лицензировано в соответствии с GNU GENERAL PUBLIC LICENSE v3+. Ознакомьтесь тут: https://raw.githubusercontent.com/penguin86/ojo/master/LICENSE</string>
     <string name="app_info_repo_desc">Исходный код в репозитории на GitHub:: https://github.com/penguin86/ojo</string>
     <string name="app_info_lib_desc">Это приложение стало возможным благодаря усилиям команды VLC и VLC-Android! Вы можете узнать больше или получить исходный код тут: https://code.videolan.org/videolan/vlc-android</string>
 
+    <string name="fab_snapshot">Снимок</string>
+    <string name="fab_record">Запись</string>
+    <string name="snapshot_saved">Снимок сохранён в Pictures/OjoZoom</string>
+    <string name="snapshot_failed">Пока нет изображения для сохранения</string>
+    <string name="recording_saved">Запись сохранена в Movies/OjoZoom</string>
+    <string name="recording_saving">Запись остановлена, сохранение…</string>
+    <string name="recording_failed">Не удалось сохранить запись</string>
+    <string name="recording_low_space">Недостаточно места для записи (нужно не менее 1 ГБ)</string>
+    <string name="recording_stopped_time_limit">Запись остановлена: достигнут лимит времени</string>
+    <string name="recording_stopped_low_space">Запись остановлена: память почти заполнена</string>
+    <string name="storage_permission_granted">Разрешение получено, нажмите кнопку ещё раз</string>
+    <string name="storage_permission_denied">Для сохранения снимков и записей нужно разрешение на доступ к памяти</string>
+    <string name="menuitem_max_recording">Макс. длительность записи: %1$d мин</string>
+    <string name="max_recording_title">Макс. длительность записи</string>
+    <string name="max_recording_minutes">%1$d мин</string>
+    <string name="app_info_fork_desc">Ojo Zoom — это форк Ojo с дополнительными функциями:\n• масштабирование двумя пальцами и двойным касанием на полноэкранной камере, перемещение пальцем, «Назад» сбрасывает масштаб\n• свайп влево или вправо на полноэкранной камере (без масштаба) показывает следующую или предыдущую камеру\n• в портретной ориентации камеры показаны одна под другой, прокрутите, чтобы увидеть все (нужно «Разрешить вращение экрана»)\n• снимки (Pictures/OjoZoom) и записи (Movies/OjoZoom): долгое нажатие на полноэкранную камеру или долгое нажатие OK на пульте показывает кнопки. Запись останавливается сама после максимальной длительности из настроек или когда заканчивается память\n• кнопка настроек скрыта при просмотре камер: долгое нажатие (1,5 с) на сетке или любая кнопка пульта на Android TV показывает её на 5 секунд</string>
 </resources>
