@@ -548,7 +548,7 @@ public class SurveillanceFragment extends Fragment {
                     resetZoom();
                     applyVideoAspect();
                     // Hide the frames drawn while the decoder adapts to the new size (green flash)
-                    if (or - ol > 1 && r - l > 1) {
+                    if (or - ol > 0 && r - l > 1) {   // Not on the first layout
                         videoView.setAlpha(0f);
                         framesToSkip = FRAMES_TO_SKIP_AFTER_RESIZE;
                         container.removeCallbacks(showVideoAfterResize);
